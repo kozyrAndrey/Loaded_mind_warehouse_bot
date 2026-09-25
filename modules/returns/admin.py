@@ -5,7 +5,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
-from modules.moysklad.search import search_products
+from modules.moysklad.search import compact_product_name, search_products
 from modules.returns.loaded_mind import CONDITIONS, split_text, summary
 from modules.returns.storage import (
     get_recent_return_records, get_return_record, mark_return_record_deleted,
@@ -86,7 +86,7 @@ async def items(update, context):
     query = update.callback_query
     await query.answer()
     record = get_return_record(context.user_data["lm_return_admin"]["record_id"])
-    rows = [[InlineKeyboardButton(f"{i + 1}. {item['product_name'][:35]}",
+    rows = [[InlineKeyboardButton(f"{i + 1}. {compact_product_name(item['product_name'], item['size'])[:45]}",
                                   callback_data=f"lmretadmin:item:{i}")]
             for i, item in enumerate(record["items"])]
     await query.edit_message_text("Выберите товар:", reply_markup=keyboard(rows))
@@ -168,7 +168,7 @@ async def text_value(update, context):
             await update.message.reply_text("Товар не найден. Попробуйте другой запрос.")
             return VALUE
         state["products"] = products
-        rows = [[InlineKeyboardButton(product["name"][:55], callback_data=f"lmretadmin:product:{index}")]
+        rows = [[InlineKeyboardButton(product["display_name"][:60], callback_data=f"lmretadmin:product:{index}")]
                 for index, product in enumerate(products)]
         await update.message.reply_text("Выберите товар:", reply_markup=keyboard(rows))
         return FIELD
@@ -197,7 +197,7 @@ async def selected_product(update, context):
     record = get_return_record(state["record_id"])
     items = record["items"]
     item = items[state["item_index"]]
-    item.update(product_id=product["id"], product_name=product["name"], size=product["size"] or "—")
+    item.update(product_id=product["id"], product_name=product["base_name"], size=product["size"] or "—")
     update_return_record(state["record_id"], items=items)
     await synchronize_topic(context, state["record_id"])
     await query.edit_message_text("✅ Товар в возврате обновлён.")

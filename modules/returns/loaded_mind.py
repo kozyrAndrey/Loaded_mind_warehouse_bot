@@ -1,6 +1,7 @@
 """Возвраты Loaded Mind с выбором товара из МойСклад."""
 
 import asyncio
+import io
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -8,14 +9,16 @@ from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandl
 
 from config import GROUP_CHAT_ID, RETURNS_TOPIC_ID, SUPPORT_MANAGER_MENTION
 from modules.marking.duplicate_chz import DuplicateChzError, extract_short_marking_code
-from modules.moysklad.search import search_products
+from modules.moysklad.search import compact_product_name, search_products
 from modules.payroll.google_sheets import find_employee_for_telegram_user, get_employees
 from modules.employees.roles import has_role
 from modules.returns.storage import create_return_record
+from modules.returns.cdek_ocr import recognize_cdek_photo
 
 
 (PHOTO, COUNTERPARTY, TRACK, COUNT, SEARCH, PRODUCT, CONDITION,
  CHZ_PHOTO, CHZ_CODE, EXTRA_PHOTO, COMMENT, CONFIRM) = range(2000, 2012)
+REVIEW = 2012
 
 CONDITIONS = {
     "normal": "норм",
@@ -33,6 +36,26 @@ def nav_keyboard(extra=None):
 
 def data(context):
     return context.user_data["lm_return"]
+
+
+def review_keyboard(value):
+    rows = []
+    if value.get("counterparty") and value.get("track_number"):
+        rows.append([InlineKeyboardButton("✅ Всё верно, продолжить", callback_data="lmret:review_confirm")])
+    rows.extend([
+        [InlineKeyboardButton("✏️ Исправить ФИО", callback_data="lmret:edit_counterparty")],
+        [InlineKeyboardButton("✏️ Исправить трек-номер", callback_data="lmret:edit_track")],
+    ])
+    return nav_keyboard(rows)
+
+
+def review_text(value):
+    return (
+        "Проверьте данные с накладной СДЭК:\n\n"
+        f"ФИО контрагента: {value.get('counterparty') or 'не распознано'}\n"
+        f"Трек-номер: {value.get('track_number') or 'не распознан'}\n\n"
+        "Если OCR ошибся, исправьте поле перед продолжением."
+    )
 
 
 async def start(update, context):
@@ -53,9 +76,49 @@ async def photo(update, context):
     if not update.message.photo:
         await update.message.reply_text("Нужно фото документа.")
         return PHOTO
-    data(context)["photo_ids"].append(update.message.photo[-1].file_id)
-    await update.message.reply_text("Введите ФИО контрагента:", reply_markup=nav_keyboard())
+    file_id = update.message.photo[-1].file_id
+    data(context)["photo_ids"].append(file_id)
+    if data(context)["return_type"] != "cdek":
+        await update.message.reply_text("Введите ФИО контрагента:", reply_markup=nav_keyboard())
+        return COUNTERPARTY
+    status = await update.message.reply_text("🔎 Считываю ФИО и трек-номер с накладной…")
+    try:
+        telegram_file = await context.bot.get_file(file_id)
+        image_buffer = io.BytesIO()
+        await telegram_file.download_to_memory(out=image_buffer)
+        recognized = await asyncio.to_thread(recognize_cdek_photo, image_buffer.getvalue())
+        data(context).update(recognized)
+    except Exception:
+        logging.exception("Не удалось распознать накладную СДЭК; доступен ручной ввод")
+    await status.edit_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
+    return REVIEW
+
+
+async def edit_counterparty(update, context):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "Введите правильное ФИО контрагента:", reply_markup=nav_keyboard()
+    )
     return COUNTERPARTY
+
+
+async def edit_track(update, context):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "Введите правильный трек-номер СДЭК цифрами:", reply_markup=nav_keyboard()
+    )
+    return TRACK
+
+
+async def review_confirm(update, context):
+    query = update.callback_query
+    await query.answer()
+    value = data(context)
+    if not value.get("counterparty") or not str(value.get("track_number") or "").isdecimal():
+        await query.edit_message_text(review_text(value), reply_markup=review_keyboard(value))
+        return REVIEW
+    await query.edit_message_text("Сколько товаров в возврате?", reply_markup=nav_keyboard())
+    return COUNT
 
 
 async def label_missing(update, context):
@@ -72,8 +135,8 @@ async def counterparty(update, context):
         return COUNTERPARTY
     data(context)["counterparty"] = value
     if data(context)["return_type"] == "cdek":
-        await update.message.reply_text("Введите трек-номер СДЭК:", reply_markup=nav_keyboard())
-        return TRACK
+        await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
+        return REVIEW
     await update.message.reply_text("Сколько товаров в возврате?", reply_markup=nav_keyboard())
     return COUNT
 
@@ -84,8 +147,8 @@ async def track(update, context):
         await update.message.reply_text("Трек-номер должен содержать только цифры.")
         return TRACK
     data(context)["track_number"] = value
-    await update.message.reply_text("Сколько товаров в возврате?", reply_markup=nav_keyboard())
-    return COUNT
+    await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
+    return REVIEW
 
 
 async def count(update, context):
@@ -109,7 +172,7 @@ async def search(update, context):
         await update.message.reply_text("Товар не найден. Попробуйте другой запрос.")
         return SEARCH
     data(context)["results"] = products
-    buttons = [[InlineKeyboardButton(p["name"][:55], callback_data=f"lmret:product:{i}")]
+    buttons = [[InlineKeyboardButton(p["display_name"][:60], callback_data=f"lmret:product:{i}")]
                for i, p in enumerate(products)]
     await update.message.reply_text("Выберите товар:", reply_markup=nav_keyboard(buttons))
     return PRODUCT
@@ -123,11 +186,11 @@ async def product(update, context):
     except (KeyError, IndexError, ValueError):
         await query.edit_message_text("Поиск устарел. Начните возврат заново.")
         return ConversationHandler.END
-    data(context)["current"] = {"product_id": item["id"], "product_name": item["name"],
+    data(context)["current"] = {"product_id": item["id"], "product_name": item["base_name"],
                                  "size": item["size"] or "—"}
     buttons = [[InlineKeyboardButton(label.capitalize(), callback_data=f"lmret:condition:{key}")]
                for key, label in CONDITIONS.items()]
-    await query.edit_message_text(f"{item['name']}\nВыберите состояние:", reply_markup=nav_keyboard(buttons))
+    await query.edit_message_text(f"{item['display_name']}\nВыберите состояние:", reply_markup=nav_keyboard(buttons))
     return CONDITION
 
 
@@ -209,7 +272,8 @@ def summary(value):
         lines.append(f"Этикетка: {value.get('label_status', 'фото приложено')}")
     lines.extend([f"Товаров: {len(value['items'])}", ""])
     for index, item in enumerate(value["items"], start=1):
-        line = f"{index}. {item['product_name']} · {item['size']} · {item['condition_label']}"
+        name_with_size = compact_product_name(item["product_name"], item["size"])
+        line = f"{index}. {name_with_size} · {item['condition_label']}"
         if item.get("chz_status"):
             line += f" · ЧЗ: {item['chz_status']}"
         if item.get("condition_comment"):
@@ -321,6 +385,11 @@ def get_loaded_mind_returns_handler():
         entry_points=[CallbackQueryHandler(start, pattern=r"^menu:return:(cdek|showroom)$")],
         states={
             PHOTO: [MessageHandler(filters.PHOTO, photo), CallbackQueryHandler(label_missing, pattern=r"^lmret:label_missing$"), stop],
+            REVIEW: [
+                CallbackQueryHandler(review_confirm, pattern=r"^lmret:review_confirm$"),
+                CallbackQueryHandler(edit_counterparty, pattern=r"^lmret:edit_counterparty$"),
+                CallbackQueryHandler(edit_track, pattern=r"^lmret:edit_track$"), stop,
+            ],
             COUNTERPARTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, counterparty), stop],
             TRACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, track), stop],
             COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, count), stop],

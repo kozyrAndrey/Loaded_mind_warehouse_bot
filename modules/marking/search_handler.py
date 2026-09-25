@@ -34,9 +34,7 @@ async def lookup(update, context):
         return WAIT_QUERY
     lines = ["🔎 Найдено в МойСклад:"]
     for product in products:
-        article = f" · арт. {product['article']}" if product["article"] else ""
-        size = f" · размер {product['size']}" if product["size"] else ""
-        lines.append(f"\n{product['name']}{size}{article}")
+        lines.append(f"\n{product['display_name']}")
     await update.message.reply_text("\n".join(lines)[:4000])
     return ConversationHandler.END
 
