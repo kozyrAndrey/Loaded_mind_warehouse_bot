@@ -21,6 +21,18 @@ def cancel_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="lmrecv:cancel")]])
 
 
+def results_keyboard(products):
+    rows = [
+        [InlineKeyboardButton(product["display_name"][:60], callback_data=f"lmrecv:product:{index}")]
+        for index, product in enumerate(products)
+    ]
+    rows.extend([
+        [InlineKeyboardButton("🔎 Новый поиск", callback_data="lmrecv:new_search")],
+        [InlineKeyboardButton("✅ Завершить приёмку", callback_data="lmrecv:finish")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
 async def start(update, context):
     query = update.callback_query
     await query.answer()
@@ -38,22 +50,20 @@ async def start(update, context):
 
 async def search(update, context):
     query_text = (update.message.text or "").strip()
+    previous_results = context.user_data["lm_receiving"].get("results")
     try:
         products = await asyncio.to_thread(search_products, query_text)
     except Exception:
         logging.exception("Ошибка поиска номенклатуры в МойСклад")
         await update.message.reply_text("Не удалось выполнить поиск в МойСклад. Проверьте запрос или повторите позже.")
-        return SEARCH
+        return SELECT_PRODUCT if previous_results else SEARCH
     if not products:
         await update.message.reply_text("Товар не найден. Введите другой штрихкод, код ЧЗ или название.")
-        return SEARCH
+        return SELECT_PRODUCT if previous_results else SEARCH
     context.user_data["lm_receiving"]["results"] = products
-    rows = [
-        [InlineKeyboardButton(product["name"][:55], callback_data=f"lmrecv:product:{index}")]
-        for index, product in enumerate(products)
-    ]
-    rows.append([InlineKeyboardButton("❌ Отмена", callback_data="lmrecv:cancel")])
-    await update.message.reply_text("Выберите товар:", reply_markup=InlineKeyboardMarkup(rows))
+    await update.message.reply_text(
+        "Выберите товар или введите новый запрос:", reply_markup=results_keyboard(products)
+    )
     return SELECT_PRODUCT
 
 
@@ -73,7 +83,9 @@ async def select_product(update, context):
         for day in (today, today - timedelta(days=1))
     ]
     rows.append([InlineKeyboardButton("❌ Отмена", callback_data="lmrecv:cancel")])
-    await query.edit_message_text(f"{product['name']}\n\nВыберите дату:", reply_markup=InlineKeyboardMarkup(rows))
+    await query.edit_message_text(
+        f"{product['display_name']}\n\nВыберите дату:", reply_markup=InlineKeyboardMarkup(rows)
+    )
     return SELECT_DATE
 
 
@@ -112,7 +124,7 @@ async def receive_rework(update, context):
     data["rework"] = int(value)
     product = data["product"]
     text = (f"Проверьте приёмку:\n{TYPE_LABELS[data['report_type']]} · {data['record_date']}\n"
-            f"{product['name']}\nПринято: {data['packed']} · Брак: {data['defective']} · "
+            f"{product['display_name']}\nПринято: {data['packed']} · Брак: {data['defective']} · "
             f"Доработка: {data['rework']}")
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Сохранить", callback_data="lmrecv:save")],
@@ -134,7 +146,7 @@ async def save(update, context):
             user_id=update.effective_user.id,
             username=update.effective_user.username or update.effective_user.full_name,
             report_type=data["report_type"],
-            product_id=product["id"], product_name=product["name"], size=product["size"],
+            product_id=product["id"], product_name=product["base_name"], size=product["size"],
             packed=data["packed"], defective=data["defective"], rework=data["rework"],
             record_date=data["record_date"],
         )
@@ -142,8 +154,31 @@ async def save(update, context):
         logging.exception("Не удалось сохранить приёмку")
         await query.edit_message_text("Не удалось сохранить приёмку. Попробуйте позже.")
         return ConversationHandler.END
+    for key in ("product", "record_date", "packed", "defective", "rework"):
+        data.pop(key, None)
+    await query.edit_message_text(
+        f"✅ Приёмка сохранена, запись №{record_id}.\n\n"
+        "Выберите следующий размер или введите новый запрос:",
+        reply_markup=results_keyboard(data["results"]),
+    )
+    return SELECT_PRODUCT
+
+
+async def new_search(update, context):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["lm_receiving"].pop("results", None)
+    await query.edit_message_text(
+        "Отсканируйте штрихкод/код ЧЗ или введите название другого товара.",
+        reply_markup=cancel_keyboard(),
+    )
+    return SEARCH
+
+
+async def finish(update, context):
+    await update.callback_query.answer()
     context.user_data.pop("lm_receiving", None)
-    await query.edit_message_text(f"✅ Приёмка сохранена, запись №{record_id}.")
+    await update.callback_query.edit_message_text("✅ Приёмка завершена.")
     return ConversationHandler.END
 
 
@@ -160,7 +195,13 @@ def get_loaded_mind_receiving_handler():
         entry_points=[CallbackQueryHandler(start, pattern=r"^recvtype:(new_supply|illiquid|rejected)$")],
         states={
             SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search), cancel_handler],
-            SELECT_PRODUCT: [CallbackQueryHandler(select_product, pattern=r"^lmrecv:product:\d+$"), cancel_handler],
+            SELECT_PRODUCT: [
+                CallbackQueryHandler(select_product, pattern=r"^lmrecv:product:\d+$"),
+                CallbackQueryHandler(new_search, pattern=r"^lmrecv:new_search$"),
+                CallbackQueryHandler(finish, pattern=r"^lmrecv:finish$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, search),
+                cancel_handler,
+            ],
             SELECT_DATE: [CallbackQueryHandler(select_date, pattern=r"^lmrecv:date:"), cancel_handler],
             PACKED: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_packed), cancel_handler],
             DEFECTIVE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_defective), cancel_handler],

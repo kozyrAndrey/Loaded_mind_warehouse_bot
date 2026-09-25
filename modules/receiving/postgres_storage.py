@@ -4,6 +4,7 @@ from datetime import date, datetime
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, desc, inspect, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from modules.moysklad.search import compact_product_name
 from modules.receiving.products import CATEGORIES
 from modules.storage.postgres import Base, check_connection, get_engine, session_scope
 
@@ -152,8 +153,7 @@ def get_last_records_text(limit=10):
             f"\n{record.record_date.strftime('%d.%m.%Y')}\n"
             f"Пользователь: {record.username or '-'}\n"
             f"Группа: {record.category_name}\n"
-            f"Модель: {record.product_name}\n"
-            f"Размер: {record.size}\n"
+            f"Товар: {compact_product_name(record.product_name, record.size)}\n"
             f"Упаковано: {record.packed}\n"
             f"Брак: {record.defective}\n"
             f"Доработка: {record.rework}"
@@ -326,21 +326,22 @@ def build_receiving_report_text(report_date, exported_by=None, only_unexported=T
 
         records = session.execute(statement).scalars().all()
 
-    grouped = defaultdict(lambda: defaultdict(lambda: {
+    grouped = defaultdict(lambda: {
         "packed": 0,
         "defective": 0,
         "rework": 0,
-    }))
+    })
 
     total_packed = 0
     total_defective = 0
     total_rework = 0
 
     for record in records:
-        product_key = f"{record.category_name} · {record.product_name}" if group_by_type else record.product_name
-        grouped[product_key][record.size]["packed"] += record.packed
-        grouped[product_key][record.size]["defective"] += record.defective
-        grouped[product_key][record.size]["rework"] += record.rework
+        name_with_size = compact_product_name(record.product_name, record.size)
+        product_key = (record.category_name if group_by_type else "", name_with_size)
+        grouped[product_key]["packed"] += record.packed
+        grouped[product_key]["defective"] += record.defective
+        grouped[product_key]["rework"] += record.rework
 
         total_packed += record.packed
         total_defective += record.defective
@@ -354,22 +355,21 @@ def build_receiving_report_text(report_date, exported_by=None, only_unexported=T
 
     lines = header_lines + [""]
 
-    for product_name in sorted(grouped.keys()):
+    previous_category = None
+    for category_name, product_name in sorted(grouped.keys()):
+        if category_name and category_name != previous_category:
+            lines.append(f"📦 {category_name}")
+            previous_category = category_name
         lines.append(product_name)
-
-        for size in sorted(grouped[product_name].keys()):
-            packed = grouped[product_name][size]["packed"]
-            defective = grouped[product_name][size]["defective"]
-            rework = grouped[product_name][size]["rework"]
-            total = packed + defective + rework
-
-            lines.append(
-                f"{size}: упаковано - {packed}, "
-                f"брак - {defective}, "
-                f"доработка - {rework}, "
-                f"общее - {total}"
-            )
-
+        totals = grouped[(category_name, product_name)]
+        packed = totals["packed"]
+        defective = totals["defective"]
+        rework = totals["rework"]
+        total = packed + defective + rework
+        lines.append(
+            f"упаковано - {packed}, брак - {defective}, "
+            f"доработка - {rework}, общее - {total}"
+        )
         lines.append("")
 
     grand_total = total_packed + total_defective + total_rework
