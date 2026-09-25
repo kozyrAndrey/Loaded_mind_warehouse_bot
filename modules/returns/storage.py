@@ -29,6 +29,7 @@ class ReturnRecord(Base):
     chat_id: Mapped[str | None] = mapped_column(String(100))
     thread_id: Mapped[str | None] = mapped_column(String(100))
     message_ids: Mapped[str | None] = mapped_column(String(1000))
+    delivery_format: Mapped[str | None] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
 
 
@@ -41,6 +42,7 @@ def ensure_returns_columns():
     statements = [
         "alter table return_records add column if not exists status varchar(50) not null default 'active'",
         "alter table return_records add column if not exists order_number varchar(100)",
+        "alter table return_records add column if not exists delivery_format varchar(30)",
         "create index if not exists ix_return_records_created_at on return_records (created_at)",
         "create index if not exists ix_return_records_return_type on return_records (return_type)",
     ]
@@ -93,6 +95,7 @@ def record_to_dict(record):
         "chat_id": record.chat_id or "",
         "thread_id": record.thread_id or "",
         "message_ids": split_message_ids(record.message_ids),
+        "delivery_format": record.delivery_format or "",
         "status": record.status or "active",
     }
 
@@ -116,6 +119,7 @@ def create_return_record(data):
             chat_id=str(data.get("chat_id", "")),
             thread_id=str(data.get("thread_id", "")),
             message_ids=message_ids,
+            delivery_format=data.get("delivery_format", ""),
             status="active",
         )
         session.add(record)

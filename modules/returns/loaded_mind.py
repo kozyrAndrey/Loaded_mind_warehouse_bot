@@ -4,7 +4,7 @@ import asyncio
 import io
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from config import GROUP_CHAT_ID, RETURNS_TOPIC_ID, SUPPORT_MANAGER_MENTION
@@ -329,6 +329,47 @@ def split_text(text, limit=3900):
     return chunks
 
 
+def split_caption(text, limit=1024):
+    """Разделяет отчёт без потери строк, не превышая лимит подписи Telegram."""
+    if len(text) <= limit:
+        return text, ""
+    boundary = text.rfind("\n", 0, limit + 1)
+    if boundary < limit // 2 or boundary >= limit:
+        boundary = limit
+    else:
+        boundary += 1
+    return text[:boundary], text[boundary:]
+
+
+async def send_return_to_topic(bot, text, photo_ids, kwargs, message_ids):
+    """Отправляет один фотоальбом с подписью; остаток длинного текста отдельно."""
+    if not photo_ids:
+        for chunk in split_text(text):
+            sent = await bot.send_message(text=chunk, **kwargs)
+            message_ids.append(sent.message_id)
+        return "text"
+
+    caption, remainder = split_caption(text)
+    if len(photo_ids) == 1:
+        sent = await bot.send_photo(photo=photo_ids[0], caption=caption, **kwargs)
+        message_ids.append(sent.message_id)
+    else:
+        start = 0
+        while start < len(photo_ids):
+            remaining = len(photo_ids) - start
+            chunk_size = 9 if remaining == 11 else min(remaining, 10)
+            chunk = photo_ids[start:start + chunk_size]
+            media = [InputMediaPhoto(media=photo_id, caption=caption if start == 0 and index == 0 else None)
+                     for index, photo_id in enumerate(chunk)]
+            sent = await bot.send_media_group(media=media, **kwargs)
+            message_ids.extend(message.message_id for message in sent)
+            start += chunk_size
+    for chunk in split_text(remainder):
+        sent = await bot.send_message(text=chunk, **kwargs)
+        message_ids.append(sent.message_id)
+    return "media"
+
+
 async def finish_item(message, context):
     value = data(context)
     value["items"].append(value.pop("current"))
@@ -361,15 +402,11 @@ async def save(update, context):
         for key in ("extra_photo_file_id", "chz_photo_file_id") if item.get(key)
     ]
     message_ids = []
+    delivery_format = "text"
     try:
         if GROUP_CHAT_ID and RETURNS_TOPIC_ID:
             kwargs = {"chat_id": int(GROUP_CHAT_ID), "message_thread_id": int(RETURNS_TOPIC_ID)}
-            for chunk in split_text(text):
-                sent = await context.bot.send_message(text=chunk, **kwargs)
-                message_ids.append(sent.message_id)
-            for photo_id in photo_ids:
-                sent = await context.bot.send_photo(photo=photo_id, **kwargs)
-                message_ids.append(sent.message_id)
+            delivery_format = await send_return_to_topic(context.bot, text, photo_ids, kwargs, message_ids)
         record_id = create_return_record({
             "return_type": value["return_type"], "employee_name": employee_name,
             "employee_user_id": update.effective_user.id,
@@ -378,6 +415,7 @@ async def save(update, context):
             "label_status": value.get("label_status", ""), "items": value["items"],
             "photo_ids": photo_ids, "chat_id": GROUP_CHAT_ID,
             "thread_id": RETURNS_TOPIC_ID, "message_ids": message_ids,
+            "delivery_format": delivery_format,
         })
     except Exception:
         logging.exception("Не удалось сохранить или отправить возврат")

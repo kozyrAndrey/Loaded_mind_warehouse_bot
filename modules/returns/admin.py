@@ -6,7 +6,7 @@ from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandl
 
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
 from modules.moysklad.search import compact_product_name, search_products
-from modules.returns.loaded_mind import CONDITIONS, split_text, summary
+from modules.returns.loaded_mind import CONDITIONS, split_caption, split_text, summary
 from modules.returns.storage import (
     get_recent_return_records, get_return_record, mark_return_record_deleted,
     update_return_record,
@@ -211,6 +211,40 @@ async def synchronize_topic(context, record_id):
     if record["chat_id"] and record["message_ids"]:
         try:
             chat_id = int(record["chat_id"])
+            if record.get("delivery_format") == "media" and record["photo_ids"]:
+                photo_count = len(record["photo_ids"])
+                media_ids = record["message_ids"][:photo_count]
+                old_text_ids = record["message_ids"][photo_count:]
+                caption, remainder = split_caption(
+                    f"Сотрудник: {record['employee_name']}\n{summary(record)}"
+                )
+                try:
+                    await context.bot.edit_message_caption(
+                        chat_id=chat_id, message_id=media_ids[0], caption=caption,
+                    )
+                except Exception as error:
+                    if "message is not modified" not in str(error).lower():
+                        raise
+                new_text_ids = []
+                for index, chunk in enumerate(split_text(remainder)):
+                    if index < len(old_text_ids):
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=chat_id, message_id=old_text_ids[index], text=chunk,
+                            )
+                        except Exception as error:
+                            if "message is not modified" not in str(error).lower():
+                                raise
+                        new_text_ids.append(old_text_ids[index])
+                    else:
+                        sent = await context.bot.send_message(
+                            chat_id=chat_id, message_thread_id=int(record["thread_id"]), text=chunk,
+                        )
+                        new_text_ids.append(sent.message_id)
+                for obsolete_id in old_text_ids[len(new_text_ids):]:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=obsolete_id)
+                update_return_record(record_id, message_ids=media_ids + new_text_ids)
+                return
             old_text_count = max(1, len(record["message_ids"]) - len(record["photo_ids"]))
             old_text_ids = record["message_ids"][:old_text_count]
             photo_message_ids = record["message_ids"][old_text_count:]
