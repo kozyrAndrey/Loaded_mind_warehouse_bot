@@ -3,6 +3,7 @@
 import logging
 import re
 
+from telegram import BotCommand, BotCommandScopeAllPrivateChats
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     ApplicationBuilder, CallbackQueryHandler, CommandHandler,
@@ -53,6 +54,22 @@ async def error_handler(update, context):
     logging.error("Ошибка при обработке update", exc_info=context.error)
 
 
+async def publish_private_commands(application):
+    """Показать вход в рабочие разделы в меню команд личного чата."""
+    commands = [
+        BotCommand("start", "Открыть меню склада"),
+        BotCommand("menu", "Показать разделы"),
+        BotCommand("whoami", "Мой Telegram ID"),
+        BotCommand("whereami", "ID чата и темы"),
+    ]
+    try:
+        await application.bot.set_my_commands(
+            commands, scope=BotCommandScopeAllPrivateChats()
+        )
+    except Exception:
+        logging.exception("Не удалось опубликовать команды личного чата")
+
+
 async def reset_conversations_on_navigation(update, context):
     if update.effective_message and update.effective_message.text in REPLY_MENU:
         context.user_data.pop("_active_module", None)
@@ -83,24 +100,31 @@ def main():
     init_module_control_storage()
 
     request = HTTPXRequest(connect_timeout=30, read_timeout=30, write_timeout=30, pool_timeout=30)
-    app = ApplicationBuilder().token(BOT_TOKEN).request(request).get_updates_request(request).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .get_updates_request(request)
+        .post_init(publish_private_commands)
+        .build()
+    )
     app.add_error_handler(error_handler)
 
     # Клавиатура в панели ввода работает из любого незавершённого диалога.
     menu_pattern = "^(?:" + "|".join(re.escape(label) for label in REPLY_MENU) + ")$"
     app.add_handler(CallbackQueryHandler(reset_conversations_on_navigation, pattern=r"^(section:|menu:start$)"), group=-4)
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(menu_pattern), reset_conversations_on_navigation), group=-4)
-    app.add_handler(CommandHandler("start", reset_conversations_on_navigation), group=-4)
+    app.add_handler(CommandHandler(["start", "menu"], reset_conversations_on_navigation), group=-4)
 
     app.add_handler(CallbackQueryHandler(access_guard), group=-3)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.COMMAND
-                                   & ~filters.Regex(r"^/(start|whoami|whereami|wehereami)(\s|$)"), access_guard), group=-3)
+                                   & ~filters.Regex(r"^/(start|menu|whoami|whereami|wehereami)(\s|$)"), access_guard), group=-3)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, access_guard), group=-3)
     app.add_handler(CallbackQueryHandler(role_guard), group=-2)
     app.add_handler(CallbackQueryHandler(module_access_guard), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, module_access_guard), group=-1)
 
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler(["start", "menu"], start))
     app.add_handler(CommandHandler(["whereami", "wehereami"], whereami))
     app.add_handler(CommandHandler("db_status", db_status))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & filters.Regex(menu_pattern), open_reply_section))

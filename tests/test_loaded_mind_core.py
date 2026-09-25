@@ -1,6 +1,10 @@
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+from telegram import BotCommandScopeAllPrivateChats
+
+from bot import publish_private_commands
 from core.keyboards import build_reply_main_keyboard
 from modules.moysklad.search import normalize_query, search_products
 from modules.returns.loaded_mind import summary
@@ -42,6 +46,23 @@ class KeyboardTests(unittest.TestCase):
         self.assertNotIn("⚙️ Управление ботом", staff_labels)
         self.assertIn("📅 Расписание", manager_labels)
         self.assertIn("⚙️ Управление ботом", manager_labels)
+
+
+class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_commands_expose_working_menu(self):
+        bot = SimpleNamespace(set_my_commands=AsyncMock())
+
+        await publish_private_commands(SimpleNamespace(bot=bot))
+
+        commands = bot.set_my_commands.await_args.args[0]
+        self.assertEqual(
+            [command.command for command in commands],
+            ["start", "menu", "whoami", "whereami"],
+        )
+        self.assertIsInstance(
+            bot.set_my_commands.await_args.kwargs["scope"],
+            BotCommandScopeAllPrivateChats,
+        )
 
 
 class ReturnSummaryTests(unittest.TestCase):
