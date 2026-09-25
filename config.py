@@ -124,10 +124,6 @@ MOYSKLAD_API_BASE_URL = os.getenv(
 MOYSKLAD_CA_FILE = os.getenv("MOYSKLAD_CA_FILE", "")
 MOYSKLAD_SSL_VERIFY = os.getenv("MOYSKLAD_SSL_VERIFY", "true")
 
-# Реквизиты для товарной этикетки ЧЗ 75×120 мм. При необходимости их можно
-# переопределить без изменения кода через переменные окружения.
-MARKING_LABEL_CUSTOMER = os.getenv("MARKING_LABEL_CUSTOMER", "")
-MARKING_LABEL_MANUFACTURER = os.getenv("MARKING_LABEL_MANUFACTURER", "")
 MOYSKLAD_SALE_PRICE_TYPE = os.getenv("MOYSKLAD_SALE_PRICE_TYPE", "Цена продажи")
 
 MARKING_ONE_C_TEMPLATE_PATH = os.getenv("MARKING_ONE_C_TEMPLATE_PATH", "")

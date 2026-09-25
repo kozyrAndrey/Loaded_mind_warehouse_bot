@@ -1,9 +1,6 @@
 import re
 from pathlib import Path
 
-from config import MARKING_LABEL_CUSTOMER, MARKING_LABEL_MANUFACTURER
-
-
 GROUP_SEPARATOR = "\x1d"
 MARKING_ASSET_DIR = Path(__file__).resolve().parents[2] / "resources" / "marking"
 HONEST_SIGN_LOGO_PATH = MARKING_ASSET_DIR / "honest_sign.jpeg"
@@ -14,6 +11,25 @@ LABEL_75X120_FONT_REDUCTION = 2 * PDF_POINTS_PER_PIXEL
 
 class DuplicateChzError(RuntimeError):
     pass
+
+
+def require_large_label_requisites(product_info):
+    """Реквизиты большой этикетки должны быть найдены в карточке МойСклад."""
+    product_info = dict(product_info or {})
+    missing = [
+        label for field, label in (
+            ("customer", "Заказчик"),
+            ("manufacturer", "Производитель"),
+        )
+        if not str(product_info.get(field) or "").strip()
+    ]
+    if missing:
+        raise DuplicateChzError(
+            "Для этикетки 75×120 в карточке товара МойСклад не заполнены поля: "
+            + ", ".join(missing)
+            + ". Проверьте дополнительные поля товара и повторите попытку."
+        )
+    return product_info
 
 
 def label_75x120_font_size(original_size):
@@ -194,6 +210,7 @@ def create_duplicate_chz_pdf(raw_code, output_path, product_info=None):
 
 def create_duplicate_chz_75x120_pdf(raw_code, output_path, product_info=None):
     """Создать товарную этикетку ЧЗ 75×120 мм по макету МойСклад."""
+    product_info = require_large_label_requisites(product_info)
     try:
         import treepoem
         from reportlab.lib import colors
@@ -390,8 +407,8 @@ def draw_75x120_product_details(
     article = str(product_info.get("article") or "").strip()
     country = str(product_info.get("country") or "").strip()
     composition = str(product_info.get("composition") or "").strip()
-    customer = str(product_info.get("customer") or MARKING_LABEL_CUSTOMER).strip()
-    manufacturer = str(product_info.get("manufacturer") or MARKING_LABEL_MANUFACTURER).strip()
+    customer = str(product_info.get("customer") or "").strip()
+    manufacturer = str(product_info.get("manufacturer") or "").strip()
 
     draw_text_block(
         pdf, model, 4 * mm, page_height - 18 * mm, 30 * mm,

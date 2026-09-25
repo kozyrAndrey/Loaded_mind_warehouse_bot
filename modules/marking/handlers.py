@@ -7,7 +7,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from core.keyboards import build_marking_menu_keyboard
-from config import MARKING_LABEL_CUSTOMER, MARKING_LABEL_MANUFACTURER
 from modules.marking.duplicate_chz import (
     DuplicateChzError,
     create_duplicate_chz_75x120_pdf,
@@ -819,13 +818,10 @@ async def duplicate_chz_code_received(update: Update, context: ContextTypes.DEFA
     try:
         product_info = find_marking_product_info(raw_code)
         label_size = context.user_data.get("marking_duplicate_chz_size", "58x40")
-        if label_size == "75x120" and not (
-            (product_info.get("customer") or MARKING_LABEL_CUSTOMER)
-            and (product_info.get("manufacturer") or MARKING_LABEL_MANUFACTURER)
-        ):
+        if label_size == "75x120" and not product_info:
             raise DuplicateChzError(
-                "Для этикетки 75×120 нужны реквизиты заказчика и производителя. "
-                "Заполните их в МойСклад или настройках бота."
+                "Не нашёл товар по GTIN кода ЧЗ в МойСклад. "
+                "Проверьте штрихкод товара и повторите попытку."
             )
         create_pdf = create_duplicate_chz_75x120_pdf if label_size == "75x120" else create_duplicate_chz_pdf
         create_pdf(raw_code, path, product_info=product_info)
@@ -838,6 +834,13 @@ async def duplicate_chz_code_received(update: Update, context: ContextTypes.DEFA
             )
     except DuplicateChzError as error:
         await status_message.edit_text(str(error), reply_markup=marking_menu_keyboard(update))
+        return ConversationHandler.END
+    except MoySkladError as error:
+        logging.exception("Ошибка поиска товара для этикетки ЧЗ в МойСклад")
+        await status_message.edit_text(
+            f"Не удалось получить товар из МойСклад: {error}",
+            reply_markup=marking_menu_keyboard(update),
+        )
         return ConversationHandler.END
     except Exception as error:
         logging.exception("Ошибка генерации дубликата ЧЗ")

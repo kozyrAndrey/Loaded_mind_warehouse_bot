@@ -1,8 +1,10 @@
 import unittest
 
 from modules.marking.duplicate_chz import (
+    DuplicateChzError,
     draw_75x120_product_details,
     label_75x120_font_size,
+    require_large_label_requisites,
     wrap_text_for_font,
 )
 
@@ -27,6 +29,14 @@ class FakePdf:
 
 
 class DuplicateChzLabelTests(unittest.TestCase):
+    def test_large_label_requires_requisites_from_product(self):
+        with self.assertRaisesRegex(DuplicateChzError, "Заказчик, Производитель"):
+            require_large_label_requisites({})
+        self.assertEqual(
+            require_large_label_requisites({"customer": "ООО Заказчик", "manufacturer": "ООО Фабрика"})["customer"],
+            "ООО Заказчик",
+        )
+
     def test_75x120_font_is_reduced_by_two_pixels(self):
         self.assertAlmostEqual(label_75x120_font_size(8), 6.5)
         self.assertAlmostEqual(label_75x120_font_size(5.5), 4.0)

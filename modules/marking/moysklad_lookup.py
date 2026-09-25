@@ -19,11 +19,7 @@ def find_marking_product_info(raw_code):
     if not gtin:
         return {}
 
-    try:
-        client = build_moysklad_client()
-    except MoySkladError:
-        logging.exception("Не удалось создать клиент МойСклад для поиска ЧЗ")
-        return {}
+    client = build_moysklad_client()
 
     for entity_type in ("assortment", "variant", "product"):
         for row in lookup_rows_by_gtin(client, entity_type, gtin):

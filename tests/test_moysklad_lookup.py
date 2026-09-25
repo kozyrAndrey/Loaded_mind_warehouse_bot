@@ -70,6 +70,28 @@ class MoySkladLookupTests(unittest.TestCase):
         self.assertEqual(actual["composition"], "Полиуретан 100%")
         self.assertEqual(actual["ean13"], "4670332747445")
 
+    def test_large_label_requisites_come_from_parent_product_attributes(self):
+        class Client:
+            def get_href(self, href, params=None):
+                self_href = "https://api.moysklad.ru/api/remap/1.2/entity/product/1"
+                self_test.assertEqual(href, self_href)
+                return {
+                    "name": "Товар Loaded Mind",
+                    "attributes": [
+                        {"name": "Заказчик", "value": "ООО Лоадед Майнд"},
+                        {"name": "Производитель", "value": {"name": "ООО Фабрика"}},
+                    ],
+                }
+
+        self_test = self
+        row = {
+            "name": "Вариант",
+            "product": {"meta": {"href": "https://api.moysklad.ru/api/remap/1.2/entity/product/1"}},
+        }
+        actual = product_info_from_row(Client(), row)
+        self.assertEqual(actual["customer"], "ООО Лоадед Майнд")
+        self.assertEqual(actual["manufacturer"], "ООО Фабрика")
+
 
 if __name__ == "__main__":
     unittest.main()
