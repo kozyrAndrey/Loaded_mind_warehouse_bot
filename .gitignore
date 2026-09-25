@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Local database
+warehouse.db
+warehouse_backup_*.db
+tmp/
+
+# Excel exports
+*.xlsx
+
+# Google credentials
+google_credentials.json
+
+# Environment variables
+.env
+
+# macOS
+.DS_Store
+._*
+
+# VS Code
+.vscode/

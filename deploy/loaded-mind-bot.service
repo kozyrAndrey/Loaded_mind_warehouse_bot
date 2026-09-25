@@ -1,0 +1,20 @@
+[Unit]
+Description=Loaded Mind Warehouse Telegram Bot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=loadedmindbot
+Group=loadedmindbot
+WorkingDirectory=/home/Loaded_mind_warehouse_bot
+EnvironmentFile=/home/Loaded_mind_warehouse_bot/.env
+ExecStart=/home/Loaded_mind_warehouse_bot/.venv/bin/python /home/Loaded_mind_warehouse_bot/bot.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/Loaded_mind_warehouse_bot
+
+[Install]
+WantedBy=multi-user.target

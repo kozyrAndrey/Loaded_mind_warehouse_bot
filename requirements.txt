@@ -1,0 +1,26 @@
+# Telegram bot framework
+python-telegram-bot[job-queue]>=22.0,<23.0
+
+# Optional: load secrets from .env file during local development
+python-dotenv>=1.0,<2.0
+
+# PostgreSQL storage
+SQLAlchemy>=2.0,<3.0
+psycopg[binary]>=3.1,<4.0
+
+# PDF generation for payroll reports
+reportlab>=4.0,<5.0
+
+# GS1 DataMatrix generation for marking duplicates
+treepoem>=3.0,<4.0
+Pillow>=10.0,<12.0
+
+# Excel export for schedule module
+openpyxl>=3.1,<4.0
+
+# HTTPS certificate bundle for external agent requests
+certifi>=2024.0
+
+# Lamoda FBS API and PDF label merging
+httpx>=0.27,<1.0
+pypdf>=5.0,<7.0
