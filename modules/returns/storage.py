@@ -22,6 +22,7 @@ class ReturnRecord(Base):
     employee_user_id: Mapped[str | None] = mapped_column(String(100))
     counterparty: Mapped[str | None] = mapped_column(String(255))
     track_number: Mapped[str | None] = mapped_column(String(100))
+    order_number: Mapped[str | None] = mapped_column(String(100))
     label_status: Mapped[str | None] = mapped_column(String(255))
     items_json: Mapped[str | None] = mapped_column(Text)
     photo_ids_json: Mapped[str | None] = mapped_column(Text)
@@ -39,6 +40,7 @@ def init_returns_storage():
 def ensure_returns_columns():
     statements = [
         "alter table return_records add column if not exists status varchar(50) not null default 'active'",
+        "alter table return_records add column if not exists order_number varchar(100)",
         "create index if not exists ix_return_records_created_at on return_records (created_at)",
         "create index if not exists ix_return_records_return_type on return_records (return_type)",
     ]
@@ -84,6 +86,7 @@ def record_to_dict(record):
         "employee_user_id": record.employee_user_id or "",
         "counterparty": record.counterparty or "",
         "track_number": record.track_number or "",
+        "order_number": record.order_number or "",
         "label_status": record.label_status or "",
         "items": loads(record.items_json),
         "photo_ids": loads(record.photo_ids_json),
@@ -106,6 +109,7 @@ def create_return_record(data):
             employee_user_id=str(data.get("employee_user_id", "")),
             counterparty=data.get("counterparty", ""),
             track_number=data.get("track_number", ""),
+            order_number=data.get("order_number", ""),
             label_status=data.get("label_status", ""),
             items_json=dumps(data.get("items", [])),
             photo_ids_json=dumps(data.get("photo_ids", [])),
@@ -140,6 +144,7 @@ def update_return_record(record_id, **fields):
         "return_type",
         "counterparty",
         "track_number",
+        "order_number",
         "label_status",
         "items",
         "photo_ids",

@@ -14,7 +14,7 @@ from modules.returns.storage import (
 
 
 SELECT, FIELD, VALUE, DELETE_CONFIRM = range(2100, 2104)
-FIELDS = {"counterparty": "ФИО контрагента", "track_number": "Трек-номер", "label_status": "Статус этикетки"}
+FIELDS = {"counterparty": "ФИО контрагента", "track_number": "Трек-номер", "order_number": "Номер заказа", "label_status": "Статус этикетки"}
 
 
 def keyboard(rows):
@@ -70,7 +70,8 @@ async def select(update, context):
         return DELETE_CONFIRM
     rows = [[InlineKeyboardButton(label, callback_data=f"lmretadmin:field:{key}")]
             for key, label in FIELDS.items()
-            if key != "track_number" or record["return_type"] == "cdek"]
+            if (key != "track_number" or record["return_type"] == "cdek")
+            and (key != "order_number" or record["return_type"] == "showroom")]
     rows.extend([
         [InlineKeyboardButton("✏️ Изменить товар", callback_data="lmretadmin:items")],
         [InlineKeyboardButton("✏️ Тип возврата", callback_data="lmretadmin:field:return_type")],

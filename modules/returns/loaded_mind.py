@@ -13,12 +13,13 @@ from modules.moysklad.search import compact_product_name, search_products
 from modules.payroll.google_sheets import find_employee_for_telegram_user, get_employees
 from modules.employees.roles import has_role
 from modules.returns.storage import create_return_record
-from modules.returns.cdek_ocr import recognize_cdek_photo
+from modules.returns.cdek_ocr import recognize_cdek_photo, recognize_showroom_photo
 
 
 (PHOTO, COUNTERPARTY, TRACK, COUNT, SEARCH, PRODUCT, CONDITION,
  CHZ_PHOTO, CHZ_CODE, EXTRA_PHOTO, COMMENT, CONFIRM) = range(2000, 2012)
 REVIEW = 2012
+ORDER_NUMBER = 2013
 
 CONDITIONS = {
     "normal": "норм",
@@ -40,22 +41,25 @@ def data(context):
 
 def review_keyboard(value):
     rows = []
-    if value.get("counterparty") and value.get("track_number"):
+    is_cdek = value["return_type"] == "cdek"
+    if value.get("counterparty") and (not is_cdek or value.get("track_number")):
         rows.append([InlineKeyboardButton("✅ Всё верно, продолжить", callback_data="lmret:review_confirm")])
-    rows.extend([
-        [InlineKeyboardButton("✏️ Исправить ФИО", callback_data="lmret:edit_counterparty")],
-        [InlineKeyboardButton("✏️ Исправить трек-номер", callback_data="lmret:edit_track")],
-    ])
+    rows.append([InlineKeyboardButton("✏️ Исправить ФИО", callback_data="lmret:edit_counterparty")])
+    if is_cdek:
+        rows.append([InlineKeyboardButton("✏️ Исправить трек-номер", callback_data="lmret:edit_track")])
+    else:
+        rows.append([InlineKeyboardButton("✏️ Добавить/исправить номер заказа", callback_data="lmret:edit_order")])
     return nav_keyboard(rows)
 
 
 def review_text(value):
-    return (
-        "Проверьте данные с накладной СДЭК:\n\n"
-        f"ФИО контрагента: {value.get('counterparty') or 'не распознано'}\n"
-        f"Трек-номер: {value.get('track_number') or 'не распознан'}\n\n"
-        "Если OCR ошибся, исправьте поле перед продолжением."
-    )
+    is_cdek = value["return_type"] == "cdek"
+    title = "накладной СДЭК" if is_cdek else "этикетки шоурума"
+    number = (f"Трек-номер: {value.get('track_number') or 'не распознан'}" if is_cdek
+              else f"Номер заказа: {value.get('order_number') or 'не найден (необязательно)'}")
+    return (f"Проверьте данные с {title}:\n\n"
+            f"ФИО контрагента: {value.get('counterparty') or 'не распознано'}\n"
+            f"{number}\n\nЕсли OCR ошибся, исправьте поле перед продолжением.")
 
 
 async def start(update, context):
@@ -78,18 +82,17 @@ async def photo(update, context):
         return PHOTO
     file_id = update.message.photo[-1].file_id
     data(context)["photo_ids"].append(file_id)
-    if data(context)["return_type"] != "cdek":
-        await update.message.reply_text("Введите ФИО контрагента:", reply_markup=nav_keyboard())
-        return COUNTERPARTY
-    status = await update.message.reply_text("🔎 Считываю ФИО и трек-номер с накладной…")
+    is_cdek = data(context)["return_type"] == "cdek"
+    status = await update.message.reply_text("🔎 Считываю данные с накладной…" if is_cdek else "🔎 Считываю данные с этикетки…")
     try:
         telegram_file = await context.bot.get_file(file_id)
         image_buffer = io.BytesIO()
         await telegram_file.download_to_memory(out=image_buffer)
-        recognized = await asyncio.to_thread(recognize_cdek_photo, image_buffer.getvalue())
+        recognize = recognize_cdek_photo if is_cdek else recognize_showroom_photo
+        recognized = await asyncio.to_thread(recognize, image_buffer.getvalue())
         data(context).update(recognized)
     except Exception:
-        logging.exception("Не удалось распознать накладную СДЭК; доступен ручной ввод")
+        logging.exception("Не удалось распознать возвратную этикетку; доступен ручной ввод")
     await status.edit_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
     return REVIEW
 
@@ -110,11 +113,20 @@ async def edit_track(update, context):
     return TRACK
 
 
+async def edit_order(update, context):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        "Введите номер заказа с этикетки:", reply_markup=nav_keyboard()
+    )
+    return ORDER_NUMBER
+
+
 async def review_confirm(update, context):
     query = update.callback_query
     await query.answer()
     value = data(context)
-    if not value.get("counterparty") or not str(value.get("track_number") or "").isdecimal():
+    if not value.get("counterparty") or (value["return_type"] == "cdek" and
+                                         not str(value.get("track_number") or "").isdecimal()):
         await query.edit_message_text(review_text(value), reply_markup=review_keyboard(value))
         return REVIEW
     await query.edit_message_text("Сколько товаров в возврате?", reply_markup=nav_keyboard())
@@ -134,7 +146,7 @@ async def counterparty(update, context):
         await update.message.reply_text("Введите ФИО контрагента.")
         return COUNTERPARTY
     data(context)["counterparty"] = value
-    if data(context)["return_type"] == "cdek":
+    if data(context).get("photo_ids"):
         await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
         return REVIEW
     await update.message.reply_text("Сколько товаров в возврате?", reply_markup=nav_keyboard())
@@ -147,6 +159,16 @@ async def track(update, context):
         await update.message.reply_text("Трек-номер должен содержать только цифры.")
         return TRACK
     data(context)["track_number"] = value
+    await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
+    return REVIEW
+
+
+async def order_number(update, context):
+    value = (update.message.text or "").strip()
+    if not 3 <= len(value) <= 50:
+        await update.message.reply_text("Введите номер заказа (3–50 символов).")
+        return ORDER_NUMBER
+    data(context)["order_number"] = value
     await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
     return REVIEW
 
@@ -270,6 +292,8 @@ def summary(value):
         lines.append(f"Трек-номер: {value.get('track_number', '')}")
     else:
         lines.append(f"Этикетка: {value.get('label_status', 'фото приложено')}")
+        if value.get("order_number"):
+            lines.append(f"Номер заказа: {value['order_number']}")
     lines.extend([f"Товаров: {len(value['items'])}", ""])
     for index, item in enumerate(value["items"], start=1):
         name_with_size = compact_product_name(item["product_name"], item["size"])
@@ -350,6 +374,7 @@ async def save(update, context):
             "return_type": value["return_type"], "employee_name": employee_name,
             "employee_user_id": update.effective_user.id,
             "counterparty": value["counterparty"], "track_number": value.get("track_number", ""),
+            "order_number": value.get("order_number", ""),
             "label_status": value.get("label_status", ""), "items": value["items"],
             "photo_ids": photo_ids, "chat_id": GROUP_CHAT_ID,
             "thread_id": RETURNS_TOPIC_ID, "message_ids": message_ids,
@@ -389,9 +414,11 @@ def get_loaded_mind_returns_handler():
                 CallbackQueryHandler(review_confirm, pattern=r"^lmret:review_confirm$"),
                 CallbackQueryHandler(edit_counterparty, pattern=r"^lmret:edit_counterparty$"),
                 CallbackQueryHandler(edit_track, pattern=r"^lmret:edit_track$"), stop,
+                CallbackQueryHandler(edit_order, pattern=r"^lmret:edit_order$"),
             ],
             COUNTERPARTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, counterparty), stop],
             TRACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, track), stop],
+            ORDER_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_number), stop],
             COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, count), stop],
             SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search), stop],
             PRODUCT: [CallbackQueryHandler(product, pattern=r"^lmret:product:\d+$"), stop],
