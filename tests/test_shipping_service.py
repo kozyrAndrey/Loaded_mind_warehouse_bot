@@ -99,6 +99,31 @@ class ShippingOrderTests(unittest.TestCase):
         self.assertEqual([row["position_id"] for row in result["units"]], ["p1", "p1", "p2"])
         self.assertEqual(result["unmarked_count"], 1)
 
+    def test_variant_without_own_gtin_is_unmarked_even_if_parent_has_gtin(self):
+        client = FakeClient(positions=[
+            {
+                "id": "p-cdek",
+                "quantity": 1,
+                "price": 50000,
+                "assortment": {
+                    "id": "variant-cdek",
+                    "name": "Доставка СДЭК",
+                    "meta": {"type": "variant"},
+                    "barcodes": [],
+                    "product": {
+                        "id": "parent-product",
+                        "name": "Родительский товар",
+                        "barcodes": [{"gtin": VALID_GTIN}],
+                    },
+                },
+            },
+        ])
+
+        result = build_order_units(client, {"id": "order-1", "name": "mind-5098"})
+
+        self.assertEqual(result["units"], [])
+        self.assertEqual(result["unmarked_count"], 1)
+
 
 class ShippingMarkingTests(unittest.TestCase):
     def test_full_code_is_reduced_to_31_characters(self):

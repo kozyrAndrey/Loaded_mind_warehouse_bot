@@ -119,16 +119,20 @@ def _normalize_catalog_gtin(value):
     return code
 
 
-def gtin_from_assortment(assortment, parent_product=None):
-    for source in (assortment or {}, parent_product or {}):
-        barcodes = source.get("barcodes") or []
-        for barcode_type in ("gtin", "ean13"):
-            for barcode in barcodes:
-                if not isinstance(barcode, dict):
-                    continue
-                gtin = _normalize_catalog_gtin(barcode.get(barcode_type))
-                if gtin:
-                    return gtin
+def gtin_from_assortment(assortment):
+    """Return only the GTIN assigned to the exact order assortment.
+
+    For a variant, a barcode inherited from the parent product must not make
+    that variant marked: marking is configured independently per modification.
+    """
+    barcodes = (assortment or {}).get("barcodes") or []
+    for barcode_type in ("gtin", "ean13"):
+        for barcode in barcodes:
+            if not isinstance(barcode, dict):
+                continue
+            gtin = _normalize_catalog_gtin(barcode.get(barcode_type))
+            if gtin:
+                return gtin
     return ""
 
 
@@ -196,8 +200,8 @@ def build_order_units(client, order):
     unmarked_count = 0
     for position in positions:
         assortment = _expanded_reference(client, position.get("assortment") or {}, reference_cache)
-        parent = _expanded_reference(client, assortment.get("product") or {}, reference_cache)
-        gtin = gtin_from_assortment(assortment, parent)
+        parent = assortment.get("product") or {}
+        gtin = gtin_from_assortment(assortment)
         quantity = _integer_quantity(position)
         price = position_unit_price(position)
         product_name = str(assortment.get("name") or parent.get("name") or "Без названия").strip()
