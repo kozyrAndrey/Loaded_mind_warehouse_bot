@@ -16,7 +16,7 @@ from core.keyboards import REPLY_MENU
 from core.module_control import init_module_control_storage, module_access_guard
 from handlers.common import (
     db_status, show_main_menu, show_receiving_menu, show_returns_menu,
-    show_marking_menu, show_employees_menu, start, whereami,
+    show_marking_menu, show_employees_menu, show_shipping_menu, start, whereami,
 )
 from handlers.navigation import open_reply_section
 from modules.admin_panel.handlers import get_admin_panel_handlers
@@ -39,6 +39,8 @@ from modules.returns.storage import init_returns_storage
 from modules.schedule.google_sheets import init_schedule_sheet
 from modules.schedule.handlers import get_schedule_handlers
 from modules.tasks.storage import init_tasks_storage
+from modules.shipping.handlers import get_shipping_handlers
+from modules.shipping.storage import init_shipping_storage
 
 
 logging.basicConfig(
@@ -92,6 +94,7 @@ def main():
     init_returns_storage()
     init_consumables_storage()
     init_marking_storage()
+    init_shipping_storage()
     init_payroll_sheet()
     init_vacation_storage()
     init_daily_summary_storage()
@@ -132,6 +135,7 @@ def main():
     for factory in (
         get_admin_panel_handlers, get_employee_handlers, get_payroll_handlers,
         get_schedule_handlers, get_consumables_handlers, get_marking_handlers,
+        get_shipping_handlers,
     ):
         for handler in factory():
             app.add_handler(handler)
@@ -145,6 +149,7 @@ def main():
     app.add_handler(CallbackQueryHandler(show_main_menu, pattern=r"^menu:start$"))
     app.add_handler(CallbackQueryHandler(show_receiving_menu, pattern=r"^section:receiving$"))
     app.add_handler(CallbackQueryHandler(show_returns_menu, pattern=r"^section:returns$"))
+    app.add_handler(CallbackQueryHandler(show_shipping_menu, pattern=r"^section:shipping$"))
     app.add_handler(CallbackQueryHandler(show_marking_menu, pattern=r"^section:marking$"))
     app.add_handler(CallbackQueryHandler(show_employees_menu, pattern=r"^section:employees$"))
 

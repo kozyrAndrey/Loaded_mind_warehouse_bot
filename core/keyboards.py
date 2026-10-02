@@ -8,6 +8,7 @@ from modules.employees.roles import has_any_role
 
 REPLY_MENU = {
     "📦 Приёмка": "receiving",
+    "🚚 Отгрузка": "shipping",
     "↩️ Возвраты": "returns",
     "🧾 Расходники": "consumables",
     "🏷 Маркировка / ЧЗ": "marking",
@@ -62,6 +63,17 @@ def build_marking_menu_keyboard(manager=False):
         [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:start")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def build_shipping_menu_keyboard():
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📦 Новая отгрузка", callback_data="shipping:new")],
+            [InlineKeyboardButton("📤 Выгрузить коды в Excel", callback_data="shipping:export")],
+            [InlineKeyboardButton("✅ Коды выведены из оборота", callback_data="shipping:retire")],
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:start")],
+        ]
+    )
 
 
 def build_employees_menu_keyboard():

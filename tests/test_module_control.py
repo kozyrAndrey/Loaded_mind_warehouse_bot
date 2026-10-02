@@ -27,6 +27,7 @@ class ModuleCallbackTests(unittest.TestCase):
             "marking:search": "marking",
             "empedit:42": "employees",
             "lmrecv:save": "receiving",
+            "shipping:export": "shipping",
             "lmret:save": "returns",
         }
         for callback_data, expected in cases.items():

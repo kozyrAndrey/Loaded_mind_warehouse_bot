@@ -14,6 +14,7 @@ from core.keyboards import (
     build_receiving_menu_keyboard,
     build_receiving_report_type_keyboard,
     build_returns_menu_keyboard,
+    build_shipping_menu_keyboard,
     build_reply_main_keyboard,
     build_start_keyboard,
 )
@@ -73,6 +74,18 @@ async def show_returns_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=build_returns_menu_keyboard(),
     )
 
+    return ConversationHandler.END
+
+
+async def show_shipping_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    context.user_data["_active_module"] = "shipping"
+    await query.edit_message_text(
+        "🚚 Отгрузка:",
+        reply_markup=build_shipping_menu_keyboard(),
+    )
     return ConversationHandler.END
 
 

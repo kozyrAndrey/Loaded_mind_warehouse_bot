@@ -7,6 +7,7 @@ from core.keyboards import (
     build_marking_menu_keyboard,
     build_receiving_report_type_keyboard,
     build_returns_menu_keyboard,
+    build_shipping_menu_keyboard,
 )
 from core.module_control import is_module_enabled
 from modules.employees.roles import has_any_role
@@ -41,6 +42,8 @@ async def open_reply_section(update, context):
         await message.reply_text("📦 Выберите тип приёмки:", reply_markup=build_receiving_report_type_keyboard())
     elif module_key == "returns":
         await message.reply_text("↩️ Возвраты:", reply_markup=build_returns_menu_keyboard())
+    elif module_key == "shipping":
+        await message.reply_text("🚚 Отгрузка:", reply_markup=build_shipping_menu_keyboard())
     elif module_key == "consumables":
         await message.reply_text("🧾 Расходники:", reply_markup=build_consumables_menu_keyboard(manager=manager))
     elif module_key == "marking":

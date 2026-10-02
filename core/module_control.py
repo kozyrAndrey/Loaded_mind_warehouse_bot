@@ -23,6 +23,7 @@ MODULES = OrderedDict(
         ("marking", "🏷 Маркировка"),
         ("employees", "👥 Сотрудники"),
         ("receiving", "📦 Оприходование"),
+        ("shipping", "🚚 Отгрузка"),
         ("returns", "↩️ Возвраты"),
     )
 )
@@ -188,6 +189,7 @@ CALLBACK_PREFIXES = {
     "marking": ("section:marking", "marking:"),
     "employees": ("section:employees", "emp"),
     "receiving": ("section:receiving", "menu:add", "menu:last", "incdate:", "report:", "recv", "lmrecv:", "specrep:", "recvtype:", "cat:", "model:", "prod:", "size:", "back:"),
+    "shipping": ("section:shipping", "shipping:"),
     "returns": ("section:returns", "menu:return", "ret", "lmret:"),
 }
 
