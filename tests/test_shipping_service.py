@@ -7,6 +7,7 @@ from modules.shipping.service import (
     parse_shipping_marking_code,
     position_unit_price,
     search_customer_orders,
+    set_order_shipping_flag,
 )
 
 
@@ -22,6 +23,9 @@ class FakeClient:
         self.positions = positions or []
         self.order_calls = []
         self.position_calls = []
+        self.metadata_attributes = []
+        self.updates = []
+        self.base_url = "https://api.moysklad.test/api/remap/1.2"
 
     def list_entities(self, entity_type, params=None):
         self.order_calls.append((entity_type, dict(params or {})))
@@ -33,6 +37,14 @@ class FakeClient:
 
     def get_href(self, href, params=None):
         raise AssertionError(f"Unexpected expansion: {href}")
+
+    def get(self, path, params=None):
+        self.asserted_metadata_path = path
+        return {"rows": self.metadata_attributes}
+
+    def update_entity(self, entity_type, entity_id, payload, params=None):
+        self.updates.append((entity_type, entity_id, payload))
+        return {"id": entity_id, **payload}
 
 
 class ShippingOrderTests(unittest.TestCase):
@@ -123,6 +135,35 @@ class ShippingOrderTests(unittest.TestCase):
 
         self.assertEqual(result["units"], [])
         self.assertEqual(result["unmarked_count"], 1)
+
+    def test_completed_shipping_sets_cloudpayments_link_to_departure_value(self):
+        client = FakeClient()
+        client.metadata_attributes = [{
+            "id": "attribute-1",
+            "name": "[CloudPayments] Ссылка на оплату",
+            "type": "link",
+            "meta": {
+                "href": "https://api.moysklad.test/attribute-1",
+                "type": "attributemetadata",
+                "mediaType": "application/json",
+            },
+        }]
+
+        set_order_shipping_flag(client, "order-1")
+
+        self.assertEqual(client.asserted_metadata_path, "entity/customerorder/metadata/attributes")
+        self.assertEqual(client.updates, [
+            (
+                "customerorder",
+                "order-1",
+                {
+                    "attributes": [{
+                        "meta": client.metadata_attributes[0]["meta"],
+                        "value": "уедет",
+                    }],
+                },
+            ),
+        ])
 
 
 class ShippingMarkingTests(unittest.TestCase):

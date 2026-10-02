@@ -6,6 +6,8 @@ from modules.moysklad.client import MoySkladError
 
 MONEY_QUANTUM = Decimal("0.01")
 PAGE_LIMIT = 100
+SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
+SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
 
 
 class ShippingValidationError(ValueError):
@@ -93,6 +95,56 @@ def search_customer_orders(client, query):
 
     active.sort(key=lambda row: str(row.get("name") or "").casefold())
     return {"orders": active, "cancelled_count": len(cancelled)}
+
+
+def set_order_shipping_flag(client, order_id):
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        raise ShippingServiceError("У заказа отсутствует идентификатор «МойСклад».")
+    try:
+        payload = client.get("entity/customerorder/metadata/attributes")
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+
+    attribute = next(
+        (
+            row for row in _response_rows(payload)
+            if str(row.get("name") or "").strip() == SHIPPING_ORDER_ATTRIBUTE_NAME
+        ),
+        None,
+    )
+    if not attribute:
+        raise ShippingServiceError(
+            f"В «МойСклад» не найдено поле «{SHIPPING_ORDER_ATTRIBUTE_NAME}»."
+        )
+    if str(attribute.get("type") or "") != "link":
+        raise ShippingServiceError(
+            f"Поле «{SHIPPING_ORDER_ATTRIBUTE_NAME}» должно иметь тип link."
+        )
+
+    attribute_meta = dict(attribute.get("meta") or {})
+    if not attribute_meta.get("href"):
+        attribute_id = str(attribute.get("id") or "").strip()
+        if not attribute_id:
+            raise ShippingServiceError("У дополнительного поля отсутствует идентификатор.")
+        attribute_meta = {
+            "href": f"{client.base_url}/entity/customerorder/metadata/attributes/{attribute_id}",
+            "type": "attributemetadata",
+            "mediaType": "application/json",
+        }
+
+    update_payload = {
+        "attributes": [
+            {
+                "meta": attribute_meta,
+                "value": SHIPPING_ORDER_ATTRIBUTE_VALUE,
+            }
+        ]
+    }
+    try:
+        return client.update_entity("customerorder", order_id, update_payload)
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
 
 
 def _expanded_reference(client, value, cache):

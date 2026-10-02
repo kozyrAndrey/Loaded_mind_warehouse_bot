@@ -17,6 +17,7 @@ from modules.shipping.service import (
     build_order_units,
     parse_shipping_marking_code,
     search_customer_orders,
+    set_order_shipping_flag,
 )
 from modules.shipping.storage import (
     confirm_export_retired,
@@ -297,10 +298,24 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SHIPPING_REVIEW
 
     order_name = draft["order"]["name"]
+    attribute_warning = ""
+    try:
+        await asyncio.to_thread(
+            set_order_shipping_flag,
+            build_moysklad_client(),
+            draft["order"]["id"],
+        )
+    except Exception as error:
+        logger.exception("Не удалось установить признак отгрузки в заказе МойСклад")
+        attribute_warning = (
+            "\n\n⚠️ Отгрузка сохранена, но не удалось записать «уедет» "
+            f"в заказ «МойСклад»: {error}"
+        )
     context.user_data.pop("shipping_draft", None)
     await query.edit_message_text(
         f"Отгрузка {order_name} завершена ✅\n"
-        f"Сохранено кодов: {saved}.",
+        f"Сохранено кодов: {saved}."
+        + (attribute_warning or "\nПоле заказа обновлено: уедет."),
         reply_markup=build_shipping_menu_keyboard(),
     )
     return ConversationHandler.END

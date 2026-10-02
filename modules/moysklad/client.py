@@ -26,20 +26,25 @@ class MoySkladClient:
         if not self.token:
             raise MoySkladError("Не указан MOYSKLAD_TOKEN.")
 
-    def get(self, path, params=None):
+    def _request(self, method, path, params=None, payload=None):
         url = f"{self.base_url}/{path.lstrip('/')}"
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
 
+        body = None
+        if payload is not None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
         request = Request(
             url,
+            data=body,
             headers={
                 "Authorization": f"Bearer {self.token}",
                 "Accept": "application/json;charset=utf-8",
                 "Content-Type": "application/json;charset=utf-8",
                 "Accept-Encoding": "gzip",
             },
-            method="GET",
+            method=method,
         )
 
         try:
@@ -61,6 +66,12 @@ class MoySkladClient:
         except json.JSONDecodeError as error:
             raise MoySkladError("МойСклад вернул невалидный JSON.") from error
 
+    def get(self, path, params=None):
+        return self._request("GET", path, params=params)
+
+    def put(self, path, payload, params=None):
+        return self._request("PUT", path, params=params, payload=payload)
+
     def get_href(self, href, params=None):
         normalized_href = str(href or "").strip()
         if not normalized_href:
@@ -78,6 +89,13 @@ class MoySkladClient:
 
     def get_entity(self, entity_type, entity_id, params=None):
         return self.get(f"entity/{entity_type}/{entity_id}", params=params or {})
+
+    def update_entity(self, entity_type, entity_id, payload, params=None):
+        return self.put(
+            f"entity/{entity_type}/{entity_id}",
+            payload,
+            params=params or {},
+        )
 
     def get_positions(self, entity_type, entity_id, params=None):
         return self.get(f"entity/{entity_type}/{entity_id}/positions", params=params or {})
