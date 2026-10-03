@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from telegram.ext import ApplicationHandlerStop
 
+from core.access import role_guard
 from core.keyboards import build_main_menu_keyboard
 from core.module_control import MODULES, module_access_guard, module_for_callback
 from modules.admin_panel.handlers import module_admin_keyboard
@@ -29,6 +30,9 @@ class ModuleCallbackTests(unittest.TestCase):
             "lmrecv:save": "receiving",
             "shipping:export": "shipping",
             "lmret:save": "returns",
+            "section:tasks": "tasks",
+            "taskdone:task_42": "tasks",
+            "regeditweekday:toggle:1": "tasks",
         }
         for callback_data, expected in cases.items():
             with self.subTest(callback_data=callback_data):
@@ -69,6 +73,26 @@ class ModuleKeyboardTests(unittest.TestCase):
 
 
 class ModuleGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_employee_cannot_use_old_task_callback(self):
+        query = SimpleNamespace(data="task:add", answer=AsyncMock())
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=42, username="employee"),
+        )
+        context = SimpleNamespace()
+
+        with patch(
+            "core.access.find_registered_employee",
+            return_value={"roles": ["warehouse_employee"], "role": "warehouse_employee"},
+        ):
+            with self.assertRaises(ApplicationHandlerStop):
+                await role_guard(update, context)
+
+        query.answer.assert_awaited_once_with(
+            "⛔️ Недостаточно прав для этого раздела.",
+            show_alert=True,
+        )
+
     async def test_disabled_old_callback_is_blocked_and_dialog_is_cleared(self):
         query = SimpleNamespace(
             data="lmrecv:save",

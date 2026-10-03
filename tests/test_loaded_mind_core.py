@@ -131,15 +131,28 @@ class ReceivingReportTests(unittest.TestCase):
 
 class KeyboardTests(unittest.TestCase):
     def test_schedule_and_admin_are_manager_only(self):
-        enabled = {"receiving", "returns", "consumables", "marking", "payroll", "schedule", "employees"}
+        enabled = {"receiving", "returns", "consumables", "marking", "payroll", "schedule", "employees", "tasks"}
         employee = {"roles": ["warehouse_employee"], "role": "warehouse_employee"}
         manager = {"roles": ["warehouse_manager"], "role": "warehouse_manager"}
         staff_labels = [button.text for row in build_reply_main_keyboard(employee, enabled).keyboard for button in row]
         manager_labels = [button.text for row in build_reply_main_keyboard(manager, enabled).keyboard for button in row]
         self.assertNotIn("📅 Расписание", staff_labels)
+        self.assertNotIn("🧩 Задачи", staff_labels)
         self.assertNotIn("⚙️ Управление ботом", staff_labels)
         self.assertIn("📅 Расписание", manager_labels)
+        self.assertIn("🧩 Задачи", manager_labels)
         self.assertIn("⚙️ Управление ботом", manager_labels)
+
+    def test_brand_manager_and_admin_can_open_tasks(self):
+        enabled = {"tasks"}
+        for role in ("brand_manager", "admin"):
+            employee = {"roles": [role], "role": role}
+            labels = [
+                button.text
+                for row in build_reply_main_keyboard(employee, enabled).keyboard
+                for button in row
+            ]
+            self.assertIn("🧩 Задачи", labels)
 
 
 class CommandMenuTests(unittest.IsolatedAsyncioTestCase):

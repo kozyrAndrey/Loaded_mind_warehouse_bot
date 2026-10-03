@@ -142,6 +142,7 @@ def has_permission(user_id, permission):
 async def role_guard(update, context):
     """Проверяет права и для старых inline-кнопок после смены ролей."""
     from telegram.ext import ApplicationHandlerStop
+    from core.module_control import module_for_callback
     from modules.employees.roles import has_any_role
 
     query = update.callback_query
@@ -155,6 +156,8 @@ async def role_guard(update, context):
     elif data == "section:schedule" or data.startswith(("sch", "schemp:")):
         allowed = has_any_role(employee, {"admin", "warehouse_manager"})
     elif data == "section:employees" or data.startswith("emp"):
+        allowed = has_any_role(employee, {"admin", "warehouse_manager", "brand_manager"})
+    elif module_for_callback(data) == "tasks":
         allowed = has_any_role(employee, {"admin", "warehouse_manager", "brand_manager"})
     if not allowed:
         await query.answer("⛔️ Недостаточно прав для этого раздела.", show_alert=True)

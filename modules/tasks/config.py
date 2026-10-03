@@ -28,7 +28,7 @@ ASSIGNEE_MODE_WORKING_TODAY = "working_today"
 ASSIGNEE_MODE_SPECIFIC = "specific"
 ASSIGNEE_MODE_NONE = "none"
 
-TASK_MANAGER_ROLES = {"warehouse_manager", "brand_manager"}
+TASK_MANAGER_ROLES = {"warehouse_manager", "brand_manager", "admin"}
 WAREHOUSE_MANAGER_ROLE = "warehouse_manager"
 
 TASK_DEADLINES = [f"{hour:02d}:00" for hour in range(11, 24)]

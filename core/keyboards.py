@@ -10,6 +10,7 @@ REPLY_MENU = {
     "📦 Приёмка": "receiving",
     "🚚 Отгрузка": "shipping",
     "↩️ Возвраты": "returns",
+    "🧩 Задачи": "tasks",
     "🧾 Расходники": "consumables",
     "🏷 Маркировка / ЧЗ": "marking",
     "💰 ЗП и KPI": "payroll",
@@ -25,6 +26,7 @@ def build_reply_main_keyboard(employee, enabled_modules=None):
         enabled_modules = enabled_module_keys()
     manager = has_any_role(employee, {"warehouse_manager", "admin"})
     staff_manager = has_any_role(employee, {"warehouse_manager", "brand_manager", "admin"})
+    tasks_manager = has_any_role(employee, {"warehouse_manager", "brand_manager", "admin"})
     labels = []
     for label, module_key in REPLY_MENU.items():
         if module_key != "admin" and module_key not in enabled_modules:
@@ -32,6 +34,8 @@ def build_reply_main_keyboard(employee, enabled_modules=None):
         if module_key in {"schedule", "admin"} and not manager:
             continue
         if module_key == "employees" and not staff_manager:
+            continue
+        if module_key == "tasks" and not tasks_manager:
             continue
         labels.append(label)
     rows = [[KeyboardButton(label)] for label in labels]

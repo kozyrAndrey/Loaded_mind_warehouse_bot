@@ -25,6 +25,7 @@ MODULES = OrderedDict(
         ("receiving", "📦 Оприходование"),
         ("shipping", "🚚 Отгрузка"),
         ("returns", "↩️ Возвраты"),
+        ("tasks", "🧩 Задачи"),
     )
 )
 
@@ -191,6 +192,17 @@ CALLBACK_PREFIXES = {
     "receiving": ("section:receiving", "menu:add", "menu:last", "incdate:", "report:", "recv", "lmrecv:", "specrep:", "recvtype:", "cat:", "model:", "prod:", "size:", "back:"),
     "shipping": ("section:shipping", "shipping:"),
     "returns": ("section:returns", "menu:return", "ret", "lmret:"),
+    "tasks": (
+        "section:tasks", "task:", "taskback:", "tasktype:",
+        "taskdate:", "taskviewdate:", "taskexportdate:",
+        "taskeditdate:", "taskedit:", "taskeditfield:", "taskstatus:",
+        "taskassignee:", "taskdeadline:", "taskdeldate:", "taskdel:",
+        "taskdelconfirm:", "taskdone:", "reg:", "regweekday:",
+        "regassigneemode:", "regassignee:", "regeditday:", "regmanage:",
+        "regmanageaction:", "regedit:", "regeditfield:",
+        "regeditweekday:", "regdelday:", "regdel:", "regdelconfirm:",
+        "irreg:",
+    ),
 }
 
 

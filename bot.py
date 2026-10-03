@@ -38,6 +38,7 @@ from modules.returns.admin import get_loaded_mind_returns_admin_handler
 from modules.returns.storage import init_returns_storage
 from modules.schedule.google_sheets import init_schedule_sheet
 from modules.schedule.handlers import get_schedule_handlers
+from modules.tasks.handlers import get_tasks_handlers
 from modules.tasks.storage import init_tasks_storage
 from modules.shipping.handlers import get_shipping_handlers
 from modules.shipping.storage import init_shipping_storage
@@ -134,7 +135,7 @@ def main():
 
     for factory in (
         get_admin_panel_handlers, get_employee_handlers, get_payroll_handlers,
-        get_schedule_handlers, get_consumables_handlers, get_marking_handlers,
+        get_schedule_handlers, get_tasks_handlers, get_consumables_handlers, get_marking_handlers,
         get_shipping_handlers,
     ):
         for handler in factory():

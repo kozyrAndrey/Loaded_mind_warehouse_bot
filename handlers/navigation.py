@@ -12,6 +12,7 @@ from core.keyboards import (
 from core.module_control import is_module_enabled
 from modules.employees.roles import has_any_role
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
+from modules.tasks.config import is_tasks_manager
 
 
 async def open_reply_section(update, context):
@@ -30,6 +31,9 @@ async def open_reply_section(update, context):
         return ConversationHandler.END
     if module_key == "employees" and not is_manager(employee):
         await update.message.reply_text("⛔️ Этот раздел доступен руководителям.")
+        return ConversationHandler.END
+    if module_key == "tasks" and not is_tasks_manager(employee):
+        await update.message.reply_text("⛔️ Раздел задач доступен только руководителям.")
         return ConversationHandler.END
     if module_key != "admin" and not is_module_enabled(module_key):
         await update.message.reply_text("⛔️ Раздел временно отключён.")
@@ -56,6 +60,9 @@ async def open_reply_section(update, context):
     elif module_key == "payroll":
         from modules.payroll.handlers import show_payroll_menu_message
         await show_payroll_menu_message(message, employee)
+    elif module_key == "tasks":
+        from modules.tasks.handlers import tasks_menu_keyboard
+        await message.reply_text("🧩 Задачи:", reply_markup=tasks_menu_keyboard())
     elif module_key == "admin":
         from core.module_control import get_module_states
         from modules.admin_panel.handlers import module_admin_keyboard
