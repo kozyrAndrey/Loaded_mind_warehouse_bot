@@ -76,7 +76,7 @@ async def shipping_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("shipping_draft", None)
     context.user_data["_active_module"] = "shipping"
     await query.edit_message_text(
-        "Отсканируйте или введите цифры из номера заказа.\n\n"
+        "Отсканируйте накладную CDEK или введите цифры из номера заказа.\n\n"
         "Например, для заказа mind-5098 введите 5098.",
         reply_markup=_cancel_keyboard(),
     )
@@ -85,13 +85,6 @@ async def shipping_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query_text = str(update.message.text or "").strip()
-    if not query_text.isdigit():
-        await update.message.reply_text(
-            "Введите только цифры из номера заказа.",
-            reply_markup=_cancel_keyboard(),
-        )
-        return SHIPPING_ORDER_NUMBER
-
     status = await update.message.reply_text("🔎 Ищу заказ в «МойСклад»…")
     try:
         result = await asyncio.to_thread(
@@ -116,19 +109,26 @@ async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TY
 
     orders = result["orders"]
     if not orders:
+        is_cdek_track = result["query_kind"] == "cdek_track"
+        lookup_label = (
+            f"трек-номеру CDEK {result['query']}"
+            if is_cdek_track
+            else f"номеру {result['query']}"
+        )
         suffix = (
             " Найденные заказы имеют статус «Отменён»."
             if result["cancelled_count"] else ""
         )
         await status.edit_text(
-            f"Заказ по номеру {query_text} не найден.{suffix}\n\n"
-            "Проверьте номер и повторите ввод.",
+            f"Заказ по {lookup_label} не найден.{suffix}\n\n"
+            "Проверьте номер и повторите ввод или сканирование.",
             reply_markup=_cancel_keyboard(),
         )
         return SHIPPING_ORDER_NUMBER
 
     context.user_data["shipping_draft"] = {
-        "query": query_text,
+        "query": result["query"],
+        "query_kind": result["query_kind"],
         "orders": orders,
     }
     if len(orders) == 1:

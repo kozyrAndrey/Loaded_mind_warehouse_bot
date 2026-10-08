@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from modules.marking.duplicate_chz import GROUP_SEPARATOR, normalize_chz_text
@@ -8,6 +9,7 @@ MONEY_QUANTUM = Decimal("0.01")
 PAGE_LIMIT = 100
 SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
+CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
 
 
 class ShippingValidationError(ValueError):
@@ -59,10 +61,27 @@ def is_cancelled_order(client, order, cache=None):
     return "отмен" in normalized
 
 
+def parse_order_lookup_query(query):
+    raw_query = str(query or "").strip()
+    cdek_match = CDEK_TRACK_RE.fullmatch(raw_query)
+    if cdek_match:
+        return {
+            "value": cdek_match.group(1),
+            "kind": "cdek_track",
+        }
+    if raw_query.isdigit():
+        return {
+            "value": raw_query,
+            "kind": "order_number",
+        }
+    raise ShippingValidationError(
+        "Введите цифры из номера заказа или отсканируйте накладную CDEK."
+    )
+
+
 def search_customer_orders(client, query):
-    query = str(query or "").strip()
-    if not query or not query.isdigit():
-        raise ShippingValidationError("Введите только цифры из номера заказа.")
+    lookup = parse_order_lookup_query(query)
+    search_value = lookup["value"]
 
     def fetch(params):
         try:
@@ -74,15 +93,21 @@ def search_customer_orders(client, query):
     try:
         rows = _all_pages(
             fetch,
-            {"search": query, "expand": "state"},
+            {"search": search_value, "expand": "state"},
         )
     except MoySkladError as error:
         raise ShippingServiceError(str(error)) from error
 
-    matching = [
-        row for row in rows
-        if query in str(row.get("name") or "")
-    ]
+    if lookup["kind"] == "cdek_track":
+        # Context search in MoySklad checks the order's string fields. A CDEK
+        # tracking number does not have to occur in the order name, so all
+        # results returned for an explicitly prefixed CDEK scan are relevant.
+        matching = rows
+    else:
+        matching = [
+            row for row in rows
+            if search_value in str(row.get("name") or "")
+        ]
     state_cache = {}
     active = []
     cancelled = []
@@ -94,7 +119,12 @@ def search_customer_orders(client, query):
         target.append(order)
 
     active.sort(key=lambda row: str(row.get("name") or "").casefold())
-    return {"orders": active, "cancelled_count": len(cancelled)}
+    return {
+        "orders": active,
+        "cancelled_count": len(cancelled),
+        "query": search_value,
+        "query_kind": lookup["kind"],
+    }
 
 
 def set_order_shipping_flag(client, order_id):

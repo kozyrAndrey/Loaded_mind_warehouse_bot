@@ -4,6 +4,7 @@ from decimal import Decimal
 from modules.shipping.service import (
     ShippingValidationError,
     build_order_units,
+    parse_order_lookup_query,
     parse_shipping_marking_code,
     position_unit_price,
     search_customer_orders,
@@ -65,6 +66,28 @@ class ShippingOrderTests(unittest.TestCase):
     def test_search_requires_only_digits(self):
         with self.assertRaises(ShippingValidationError):
             search_customer_orders(FakeClient(), "mind-5098")
+
+    def test_cdek_scan_strips_prefix_and_searches_by_tracking_number(self):
+        client = FakeClient(orders=[
+            {"id": "1", "name": "mind-5098", "state": {"name": "Подтвержден"}},
+        ])
+
+        result = search_customer_orders(client, "[CDK]10310786311")
+
+        self.assertEqual([row["name"] for row in result["orders"]], ["mind-5098"])
+        self.assertEqual(result["query"], "10310786311")
+        self.assertEqual(result["query_kind"], "cdek_track")
+        self.assertEqual(client.order_calls[0][1]["search"], "10310786311")
+
+    def test_cdek_scan_is_case_insensitive_and_allows_space(self):
+        self.assertEqual(
+            parse_order_lookup_query(" [cdk] 10310786311 "),
+            {"value": "10310786311", "kind": "cdek_track"},
+        )
+
+    def test_cdek_scan_requires_numeric_tracking_number(self):
+        with self.assertRaises(ShippingValidationError):
+            parse_order_lookup_query("[CDK]10310ABC")
 
     def test_price_uses_position_discount(self):
         self.assertEqual(
