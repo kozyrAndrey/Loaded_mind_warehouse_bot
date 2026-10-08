@@ -1,4 +1,5 @@
 import re
+import uuid
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from modules.marking.duplicate_chz import GROUP_SEPARATOR, normalize_chz_text
@@ -11,6 +12,7 @@ SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
 CDEK_ORDER_ATTRIBUTE_NAME = "Накладная СДЭК"
 CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
+ALREADY_SHIPPED_ORDER_ATTRIBUTE_VALUE = "уехал"
 
 
 class ShippingValidationError(ValueError):
@@ -219,6 +221,143 @@ def set_order_shipping_flag(client, order_id):
     }
     try:
         return client.update_entity("customerorder", order_id, update_payload)
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+
+
+def get_order_shipping_flag(client, order_id):
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        raise ShippingServiceError("У заказа отсутствует идентификатор «МойСклад».")
+    try:
+        order = client.get_entity("customerorder", order_id)
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+    attribute = next(
+        (
+            row for row in order.get("attributes") or []
+            if str(row.get("name") or "").strip() == SHIPPING_ORDER_ATTRIBUTE_NAME
+        ),
+        None,
+    )
+    return str((attribute or {}).get("value") or "").strip()
+
+
+def order_is_already_shipped(value):
+    return (
+        str(value or "").strip().casefold().replace("ё", "е")
+        == ALREADY_SHIPPED_ORDER_ATTRIBUTE_VALUE
+    )
+
+
+def new_demand_sync_id():
+    return str(uuid.uuid4())
+
+
+def _validated_sync_id(value):
+    try:
+        return str(uuid.UUID(str(value or "")))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ShippingServiceError("Некорректный идентификатор операции отгрузки.") from error
+
+
+def _reference_meta(value):
+    meta = dict((value or {}).get("meta") or {}) if isinstance(value, dict) else {}
+    return {"meta": meta} if meta.get("href") else value
+
+
+def _demand_create_payload(template, sync_id):
+    payload = dict(template or {})
+    for key in (
+        "meta",
+        "id",
+        "accountId",
+        "created",
+        "updated",
+        "deleted",
+        "printed",
+        "published",
+        "payedSum",
+        "sum",
+        "files",
+    ):
+        payload.pop(key, None)
+
+    position_container = payload.pop("positions", {}) or {}
+    position_rows = (
+        position_container.get("rows") or []
+        if isinstance(position_container, dict)
+        else position_container
+    )
+    positions = []
+    for source_position in position_rows:
+        position = dict(source_position or {})
+        for key in (
+            "meta",
+            "id",
+            "accountId",
+            "overhead",
+            "trackingCodes",
+            "trackingCodes1162",
+        ):
+            position.pop(key, None)
+        position["assortment"] = _reference_meta(position.get("assortment"))
+        positions.append(position)
+    if not positions:
+        raise ShippingServiceError("Шаблон отгрузки не содержит товарных позиций.")
+    payload["positions"] = positions
+
+    for key in (
+        "agent",
+        "organization",
+        "store",
+        "group",
+        "owner",
+        "customerOrder",
+        "salesChannel",
+        "contract",
+        "project",
+        "state",
+        "organizationAccount",
+        "agentAccount",
+    ):
+        if key in payload:
+            payload[key] = _reference_meta(payload[key])
+
+    payload["syncId"] = _validated_sync_id(sync_id)
+    payload["applicable"] = True
+    return payload
+
+
+def create_posted_demand_from_order(client, order_id, sync_id):
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        raise ShippingServiceError("У заказа отсутствует идентификатор «МойСклад».")
+    try:
+        order = client.get_entity("customerorder", order_id)
+        order_meta = dict(order.get("meta") or {})
+        if not order_meta.get("href"):
+            raise ShippingServiceError("У заказа отсутствуют метаданные «МойСклад».")
+        template = client.put(
+            "entity/demand/new",
+            {"customerOrder": {"meta": order_meta}},
+        )
+        payload = _demand_create_payload(template, sync_id)
+        demand = client.create_entity("demand", payload)
+        demand_id = str((demand or {}).get("id") or "").strip()
+        if not demand_id:
+            raise ShippingServiceError("«МойСклад» создал отгрузку без идентификатора.")
+        if not demand.get("applicable"):
+            demand = client.update_entity(
+                "demand",
+                demand_id,
+                {"applicable": True},
+            )
+        if not demand.get("applicable"):
+            raise ShippingServiceError("Созданную отгрузку не удалось провести.")
+        return demand
+    except ShippingServiceError:
+        raise
     except MoySkladError as error:
         raise ShippingServiceError(str(error)) from error
 

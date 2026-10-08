@@ -72,6 +72,9 @@ class MoySkladClient:
     def put(self, path, payload, params=None):
         return self._request("PUT", path, params=params, payload=payload)
 
+    def post(self, path, payload=None, params=None):
+        return self._request("POST", path, params=params, payload=payload)
+
     def get_href(self, href, params=None):
         normalized_href = str(href or "").strip()
         if not normalized_href:
@@ -93,6 +96,13 @@ class MoySkladClient:
     def update_entity(self, entity_type, entity_id, payload, params=None):
         return self.put(
             f"entity/{entity_type}/{entity_id}",
+            payload,
+            params=params or {},
+        )
+
+    def create_entity(self, entity_type, payload, params=None):
+        return self.post(
+            f"entity/{entity_type}",
             payload,
             params=params or {},
         )

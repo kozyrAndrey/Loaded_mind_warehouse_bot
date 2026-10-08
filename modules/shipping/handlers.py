@@ -15,6 +15,10 @@ from modules.shipping.service import (
     ShippingServiceError,
     ShippingValidationError,
     build_order_units,
+    create_posted_demand_from_order,
+    get_order_shipping_flag,
+    new_demand_sync_id,
+    order_is_already_shipped,
     parse_shipping_marking_code,
     search_customer_orders,
     set_order_shipping_flag,
@@ -30,7 +34,13 @@ from modules.shipping.storage import (
 
 logger = logging.getLogger(__name__)
 
-SHIPPING_ORDER_NUMBER, SHIPPING_ORDER_CHOICE, SHIPPING_SCAN, SHIPPING_REVIEW = range(5100, 5104)
+(
+    SHIPPING_ORDER_NUMBER,
+    SHIPPING_ORDER_CHOICE,
+    SHIPPING_ALREADY_SHIPPED,
+    SHIPPING_SCAN,
+    SHIPPING_REVIEW,
+) = range(5100, 5105)
 
 
 def _cancel_keyboard():
@@ -53,6 +63,25 @@ def _review_keyboard():
         [
             [InlineKeyboardButton("✅ Завершить отгрузку", callback_data="shipping:finish")],
             [InlineKeyboardButton("❌ Отмена", callback_data="shipping:cancel")],
+        ]
+    )
+
+
+def _already_shipped_keyboard():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "⚠️ Всё равно отгрузить",
+                    callback_data="shipping:already_shipped:continue",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Не отправлять",
+                    callback_data="shipping:already_shipped:stop",
+                )
+            ],
         ]
     )
 
@@ -163,9 +192,24 @@ async def order_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _prepare_selected_order(query.message, context, order)
 
 
-async def _prepare_selected_order(message, context, order):
+async def _prepare_selected_order(message, context, order, allow_already_shipped=False):
     try:
-        prepared = await asyncio.to_thread(build_order_units, build_moysklad_client(), order)
+        client = build_moysklad_client()
+        if not allow_already_shipped:
+            shipping_flag = await asyncio.to_thread(
+                get_order_shipping_flag,
+                client,
+                order.get("id"),
+            )
+            if order_is_already_shipped(shipping_flag):
+                _draft(context)["pending_order"] = order
+                await message.edit_text(
+                    f"⚠️ Заказ {order.get('name')} уже отмечен как «уехал».\n\n"
+                    "Всё равно начать новую отгрузку по этому заказу?",
+                    reply_markup=_already_shipped_keyboard(),
+                )
+                return SHIPPING_ALREADY_SHIPPED
+        prepared = await asyncio.to_thread(build_order_units, client, order)
     except (ShippingServiceError, MoySkladError) as error:
         logger.warning("Не удалось загрузить позиции заказа: %s", error)
         await message.edit_text(
@@ -190,10 +234,45 @@ async def _prepare_selected_order(message, context, order):
         "codes": [],
         "unmarked_count": prepared["unmarked_count"],
         "no_code_count": 0,
+        "already_shipped": bool(allow_already_shipped),
+        "demand_sync_id": new_demand_sync_id(),
     }
     if not prepared["units"]:
         return await _show_review(message, context)
     return await _ask_for_current_code(message, context)
+
+
+async def already_shipped_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    try:
+        order = _draft(context).pop("pending_order")
+    except KeyError:
+        await query.edit_message_text(
+            "Состояние отгрузки потеряно. Начните заново.",
+            reply_markup=build_shipping_menu_keyboard(),
+        )
+        return ConversationHandler.END
+    await query.edit_message_text(
+        f"Продолжаю отгрузку заказа {order.get('name')}. Загружаю товары…"
+    )
+    return await _prepare_selected_order(
+        query.message,
+        context,
+        order,
+        allow_already_shipped=True,
+    )
+
+
+async def already_shipped_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("shipping_draft", None)
+    await query.edit_message_text(
+        "Отгрузка не начата. Заказ оставлен без изменений.",
+        reply_markup=build_shipping_menu_keyboard(),
+    )
+    return ConversationHandler.END
 
 
 async def _ask_for_current_code(message, context):
@@ -278,9 +357,32 @@ async def _show_review(message, context):
 
 async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     draft = _draft(context)
+    if draft.get("finishing"):
+        await query.answer("Отгрузка уже создаётся.")
+        return SHIPPING_REVIEW
+    await query.answer()
+    draft["finishing"] = True
     user = update.effective_user
+    await query.edit_message_text("Создаю проведённую отгрузку в «МойСклад»…")
+    try:
+        client = build_moysklad_client()
+        demand = await asyncio.to_thread(
+            create_posted_demand_from_order,
+            client,
+            draft["order"]["id"],
+            draft["demand_sync_id"],
+        )
+    except Exception as error:
+        logger.exception("Не удалось создать проведённую отгрузку в МойСклад")
+        draft.pop("finishing", None)
+        await query.edit_message_text(
+            "⚠️ Не удалось создать проведённую отгрузку в «МойСклад».\n\n"
+            f"{error}\n\nДанные не сохранены; можно повторить попытку.",
+            reply_markup=_review_keyboard(),
+        )
+        return SHIPPING_REVIEW
+
     try:
         saved = await asyncio.to_thread(
             save_shipping,
@@ -289,33 +391,44 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user.id,
             _employee_name(user),
         )
-    except Exception:
+    except Exception as error:
         logger.exception("Не удалось сохранить отгрузку")
+        draft.pop("finishing", None)
         await query.edit_message_text(
-            "⚠️ Не удалось сохранить отгрузку. Данные не записаны; попробуйте ещё раз.",
+            f"⚠️ Отгрузка {demand.get('name') or demand.get('id')} создана в «МойСклад», "
+            "но локальные коды сохранить не удалось.\n\n"
+            f"{error}\n\nПовторите попытку: дубликат документа создан не будет.",
             reply_markup=_review_keyboard(),
         )
         return SHIPPING_REVIEW
 
     order_name = draft["order"]["name"]
     attribute_warning = ""
-    try:
-        await asyncio.to_thread(
-            set_order_shipping_flag,
-            build_moysklad_client(),
-            draft["order"]["id"],
-        )
-    except Exception as error:
-        logger.exception("Не удалось установить признак отгрузки в заказе МойСклад")
-        attribute_warning = (
-            "\n\n⚠️ Отгрузка сохранена, но не удалось записать «уедет» "
-            f"в заказ «МойСклад»: {error}"
-        )
+    if not draft.get("already_shipped"):
+        try:
+            await asyncio.to_thread(
+                set_order_shipping_flag,
+                client,
+                draft["order"]["id"],
+            )
+        except Exception as error:
+            logger.exception("Не удалось установить признак отгрузки в заказе МойСклад")
+            attribute_warning = (
+                "\n\n⚠️ Отгрузка создана, но не удалось записать «уедет» "
+                f"в заказ «МойСклад»: {error}"
+            )
     context.user_data.pop("shipping_draft", None)
+    demand_name = str(demand.get("name") or demand.get("id") or "без номера")
+    flag_result = (
+        "\nПоле заказа оставлено без изменений: уехал."
+        if draft.get("already_shipped")
+        else (attribute_warning or "\nПоле заказа обновлено: уедет.")
+    )
     await query.edit_message_text(
         f"Отгрузка {order_name} завершена ✅\n"
+        f"В «МойСклад» создан и проведён документ: {demand_name}.\n"
         f"Сохранено кодов: {saved}."
-        + (attribute_warning or "\nПоле заказа обновлено: уедет."),
+        + flag_result,
         reply_markup=build_shipping_menu_keyboard(),
     )
     return ConversationHandler.END
@@ -478,6 +591,17 @@ def get_shipping_handlers():
             ],
             SHIPPING_ORDER_CHOICE: [
                 CallbackQueryHandler(order_selected, pattern=r"^shipping:order:\d+$"),
+                CallbackQueryHandler(shipping_cancel, pattern=r"^shipping:cancel$"),
+            ],
+            SHIPPING_ALREADY_SHIPPED: [
+                CallbackQueryHandler(
+                    already_shipped_continue,
+                    pattern=r"^shipping:already_shipped:continue$",
+                ),
+                CallbackQueryHandler(
+                    already_shipped_stop,
+                    pattern=r"^shipping:already_shipped:stop$",
+                ),
                 CallbackQueryHandler(shipping_cancel, pattern=r"^shipping:cancel$"),
             ],
             SHIPPING_SCAN: [

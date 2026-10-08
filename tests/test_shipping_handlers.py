@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock, patch
 from telegram.ext import ConversationHandler
 
 from modules.shipping.handlers import (
+    SHIPPING_ALREADY_SHIPPED,
     SHIPPING_REVIEW,
     SHIPPING_SCAN,
+    _prepare_selected_order,
     marking_code_received,
     no_code_selected,
     shipping_finish,
@@ -30,6 +32,7 @@ def shipping_draft(codes=None):
         "codes": list(codes or []),
         "unmarked_count": 0,
         "no_code_count": 0,
+        "demand_sync_id": "11111111-1111-4111-8111-111111111111",
     }
 
 
@@ -68,6 +71,10 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         client = object()
 
         with (
+            patch(
+                "modules.shipping.handlers.create_posted_demand_from_order",
+                return_value={"id": "d1", "name": "00001", "applicable": True},
+            ) as create_demand,
             patch("modules.shipping.handlers.save_shipping", return_value=1) as save,
             patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
             patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
@@ -79,10 +86,86 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(state, ConversationHandler.END)
+        create_demand.assert_called_once_with(
+            client,
+            "o1",
+            "11111111-1111-4111-8111-111111111111",
+        )
         save.assert_called_once()
         set_flag.assert_called_once_with(client, "o1")
         self.assertNotIn("shipping_draft", context.user_data)
+        self.assertIn("создан и проведён документ: 00001", query.edit_message_text.await_args.args[0])
         self.assertIn("Поле заказа обновлено: уедет", query.edit_message_text.await_args.args[0])
+
+    async def test_already_shipped_order_requires_confirmation_before_scanning(self):
+        message = SimpleNamespace(edit_text=AsyncMock())
+        context = SimpleNamespace(user_data={"shipping_draft": {"orders": []}})
+        order = {"id": "o1", "name": "mind-5098"}
+        client = object()
+
+        with (
+            patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
+            patch("modules.shipping.handlers.get_order_shipping_flag", return_value="уехал"),
+            patch("modules.shipping.handlers.build_order_units") as build_units,
+        ):
+            state = await _prepare_selected_order(message, context, order)
+
+        self.assertEqual(state, SHIPPING_ALREADY_SHIPPED)
+        build_units.assert_not_called()
+        self.assertEqual(context.user_data["shipping_draft"]["pending_order"], order)
+        self.assertIn("уже отмечен как «уехал»", message.edit_text.await_args.args[0])
+
+    async def test_forced_shipping_preserves_already_shipped_flag(self):
+        query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+        user = SimpleNamespace(id=7, full_name="Сотрудник", username="worker")
+        draft = shipping_draft()
+        draft["already_shipped"] = True
+        context = SimpleNamespace(user_data={"shipping_draft": draft})
+        client = object()
+
+        with (
+            patch(
+                "modules.shipping.handlers.create_posted_demand_from_order",
+                return_value={"id": "d1", "name": "00002", "applicable": True},
+            ),
+            patch("modules.shipping.handlers.save_shipping", return_value=0),
+            patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
+            patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
+            patch("modules.shipping.handlers._employee_name", return_value="Сотрудник"),
+        ):
+            state = await shipping_finish(
+                SimpleNamespace(callback_query=query, effective_user=user),
+                context,
+            )
+
+        self.assertEqual(state, ConversationHandler.END)
+        set_flag.assert_not_called()
+        self.assertIn("оставлено без изменений: уехал", query.edit_message_text.await_args.args[0])
+
+    async def test_demand_creation_failure_keeps_review_and_does_not_save_codes(self):
+        query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+        user = SimpleNamespace(id=7, full_name="Сотрудник", username="worker")
+        context = SimpleNamespace(user_data={"shipping_draft": shipping_draft()})
+
+        with (
+            patch(
+                "modules.shipping.handlers.create_posted_demand_from_order",
+                side_effect=RuntimeError("Недостаточно товара на складе"),
+            ),
+            patch("modules.shipping.handlers.save_shipping") as save,
+            patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
+            patch("modules.shipping.handlers.build_moysklad_client", return_value=object()),
+        ):
+            state = await shipping_finish(
+                SimpleNamespace(callback_query=query, effective_user=user),
+                context,
+            )
+
+        self.assertEqual(state, SHIPPING_REVIEW)
+        save.assert_not_called()
+        set_flag.assert_not_called()
+        self.assertNotIn("finishing", context.user_data["shipping_draft"])
+        self.assertIn("Недостаточно товара", query.edit_message_text.await_args.args[0])
 
 
 if __name__ == "__main__":

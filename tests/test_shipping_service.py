@@ -1,4 +1,5 @@
 import unittest
+import uuid
 from decimal import Decimal
 
 from modules.shipping.service import (
@@ -6,6 +7,9 @@ from modules.shipping.service import (
     ShippingServiceError,
     ShippingValidationError,
     build_order_units,
+    create_posted_demand_from_order,
+    get_order_shipping_flag,
+    order_is_already_shipped,
     parse_order_lookup_query,
     parse_shipping_marking_code,
     position_unit_price,
@@ -28,6 +32,10 @@ class FakeClient:
         self.position_calls = []
         self.metadata_attributes = []
         self.updates = []
+        self.order_detail = {}
+        self.template = {}
+        self.put_calls = []
+        self.create_calls = []
         self.base_url = "https://api.moysklad.test/api/remap/1.2"
 
     def list_entities(self, entity_type, params=None):
@@ -41,6 +49,10 @@ class FakeClient:
     def get_href(self, href, params=None):
         raise AssertionError(f"Unexpected expansion: {href}")
 
+    def get_entity(self, entity_type, entity_id, params=None):
+        self.entity_call = (entity_type, entity_id, dict(params or {}))
+        return self.order_detail
+
     def get(self, path, params=None):
         self.asserted_metadata_path = path
         return {"rows": self.metadata_attributes}
@@ -48,6 +60,14 @@ class FakeClient:
     def update_entity(self, entity_type, entity_id, payload, params=None):
         self.updates.append((entity_type, entity_id, payload))
         return {"id": entity_id, **payload}
+
+    def put(self, path, payload, params=None):
+        self.put_calls.append((path, payload, dict(params or {})))
+        return self.template
+
+    def create_entity(self, entity_type, payload, params=None):
+        self.create_calls.append((entity_type, payload, dict(params or {})))
+        return {"id": "demand-1", "name": "00001", "applicable": True}
 
 
 class ShippingOrderTests(unittest.TestCase):
@@ -207,6 +227,78 @@ class ShippingOrderTests(unittest.TestCase):
                 },
             ),
         ])
+
+    def test_already_shipped_flag_is_read_from_order(self):
+        client = FakeClient()
+        client.order_detail = {
+            "attributes": [{
+                "name": "[CloudPayments] Ссылка на оплату",
+                "value": " УЕХАЛ ",
+            }],
+        }
+
+        value = get_order_shipping_flag(client, "order-1")
+
+        self.assertEqual(value, "УЕХАЛ")
+        self.assertTrue(order_is_already_shipped(value))
+        self.assertFalse(order_is_already_shipped("уедет"))
+
+    def test_posted_demand_is_created_from_order_template_without_marking_codes(self):
+        client = FakeClient()
+        order_meta = {
+            "href": f"{client.base_url}/entity/customerorder/order-1",
+            "type": "customerorder",
+        }
+        assortment_meta = {
+            "href": f"{client.base_url}/entity/product/product-1",
+            "type": "product",
+        }
+        client.order_detail = {"id": "order-1", "meta": order_meta}
+        client.template = {
+            "name": "00001",
+            "applicable": False,
+            "agent": {"meta": {"href": "agent-href", "type": "counterparty"}, "name": "Покупатель"},
+            "customerOrder": {"meta": order_meta, "name": "mind-5098"},
+            "sum": 100000,
+            "payedSum": 100000,
+            "printed": False,
+            "files": {"meta": {"size": 0}},
+            "positions": {"rows": [{
+                "id": "template-position",
+                "quantity": 1,
+                "price": 100000,
+                "assortment": {"meta": assortment_meta, "name": "Куртка"},
+                "overhead": 0,
+                "trackingCodes": [{"cis": "must-not-be-copied"}],
+            }]},
+        }
+
+        sync_id = "11111111-1111-4111-8111-111111111111"
+        result = create_posted_demand_from_order(client, "order-1", sync_id)
+
+        self.assertEqual(result["id"], "demand-1")
+        self.assertEqual(client.put_calls, [(
+            "entity/demand/new",
+            {"customerOrder": {"meta": order_meta}},
+            {},
+        )])
+        entity_type, payload, params = client.create_calls[0]
+        self.assertEqual(entity_type, "demand")
+        self.assertEqual(params, {})
+        self.assertTrue(payload["applicable"])
+        self.assertEqual(payload["customerOrder"], {"meta": order_meta})
+        self.assertEqual(payload["agent"], {
+            "meta": {"href": "agent-href", "type": "counterparty"},
+        })
+        self.assertEqual(payload["positions"], [{
+            "quantity": 1,
+            "price": 100000,
+            "assortment": {"meta": assortment_meta},
+        }])
+        self.assertNotIn("sum", payload)
+        self.assertNotIn("payedSum", payload)
+        self.assertNotIn("files", payload)
+        self.assertEqual(str(uuid.UUID(payload["syncId"])), sync_id)
 
 
 class ShippingMarkingTests(unittest.TestCase):
