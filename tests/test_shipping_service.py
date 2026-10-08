@@ -2,6 +2,8 @@ import unittest
 from decimal import Decimal
 
 from modules.shipping.service import (
+    CDEK_ORDER_ATTRIBUTE_NAME,
+    ShippingServiceError,
     ShippingValidationError,
     build_order_units,
     parse_order_lookup_query,
@@ -71,13 +73,31 @@ class ShippingOrderTests(unittest.TestCase):
         client = FakeClient(orders=[
             {"id": "1", "name": "mind-5098", "state": {"name": "Подтвержден"}},
         ])
+        attribute_href = (
+            "https://api.moysklad.test/api/remap/1.2/"
+            "entity/customerorder/metadata/attributes/cdek-track"
+        )
+        client.metadata_attributes = [{
+            "id": "cdek-track",
+            "name": CDEK_ORDER_ATTRIBUTE_NAME,
+            "type": "string",
+            "meta": {"href": attribute_href},
+        }]
 
         result = search_customer_orders(client, "[CDK]10310786311")
 
         self.assertEqual([row["name"] for row in result["orders"]], ["mind-5098"])
         self.assertEqual(result["query"], "10310786311")
         self.assertEqual(result["query_kind"], "cdek_track")
-        self.assertEqual(client.order_calls[0][1]["search"], "10310786311")
+        self.assertEqual(
+            client.order_calls[0][1]["filter"],
+            f"{attribute_href}=10310786311",
+        )
+        self.assertNotIn("search", client.order_calls[0][1])
+
+    def test_cdek_search_reports_missing_moysklad_attribute(self):
+        with self.assertRaisesRegex(ShippingServiceError, CDEK_ORDER_ATTRIBUTE_NAME):
+            search_customer_orders(FakeClient(), "[CDK]10310786311")
 
     def test_cdek_scan_is_case_insensitive_and_allows_space(self):
         self.assertEqual(

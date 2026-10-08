@@ -9,6 +9,7 @@ MONEY_QUANTUM = Decimal("0.01")
 PAGE_LIMIT = 100
 SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
+CDEK_ORDER_ATTRIBUTE_NAME = "Накладная СДЭК"
 CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
 
 
@@ -79,6 +80,39 @@ def parse_order_lookup_query(query):
     )
 
 
+def _customer_order_attribute_href(client, attribute_name, expected_type=None):
+    try:
+        payload = client.get("entity/customerorder/metadata/attributes")
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+
+    attribute = next(
+        (
+            row for row in _response_rows(payload)
+            if str(row.get("name") or "").strip() == attribute_name
+        ),
+        None,
+    )
+    if not attribute:
+        raise ShippingServiceError(
+            f"В «МойСклад» не найдено поле «{attribute_name}»."
+        )
+    if expected_type and str(attribute.get("type") or "") != expected_type:
+        raise ShippingServiceError(
+            f"Поле «{attribute_name}» должно иметь тип {expected_type}."
+        )
+
+    href = str((attribute.get("meta") or {}).get("href") or "").strip()
+    if href:
+        return href
+    attribute_id = str(attribute.get("id") or "").strip()
+    if not attribute_id:
+        raise ShippingServiceError(
+            f"У поля «{attribute_name}» отсутствует идентификатор."
+        )
+    return f"{client.base_url}/entity/customerorder/metadata/attributes/{attribute_id}"
+
+
 def search_customer_orders(client, query):
     lookup = parse_order_lookup_query(query)
     search_value = lookup["value"]
@@ -90,18 +124,30 @@ def search_customer_orders(client, query):
             fallback = {key: value for key, value in params.items() if key != "expand"}
             return client.list_entities("customerorder", params=fallback)
 
+    if lookup["kind"] == "cdek_track":
+        attribute_href = _customer_order_attribute_href(
+            client,
+            CDEK_ORDER_ATTRIBUTE_NAME,
+            expected_type="string",
+        )
+        search_params = {
+            "filter": f"{attribute_href}={search_value}",
+            "expand": "state",
+        }
+    else:
+        search_params = {"search": search_value, "expand": "state"}
+
     try:
         rows = _all_pages(
             fetch,
-            {"search": search_value, "expand": "state"},
+            search_params,
         )
     except MoySkladError as error:
         raise ShippingServiceError(str(error)) from error
 
     if lookup["kind"] == "cdek_track":
-        # Context search in MoySklad checks the order's string fields. A CDEK
-        # tracking number does not have to occur in the order name, so all
-        # results returned for an explicitly prefixed CDEK scan are relevant.
+        # The CDEK waybill is a custom order attribute and is not included in
+        # MoySklad's general contextual search.
         matching = rows
     else:
         matching = [
