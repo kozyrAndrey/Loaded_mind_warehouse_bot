@@ -105,7 +105,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
-            patch("modules.shipping.handlers.get_order_shipping_flag", return_value="уехал"),
+            patch("modules.shipping.handlers.get_order_shipping_flag", return_value="уедет"),
             patch("modules.shipping.handlers.build_order_units") as build_units,
         ):
             state = await _prepare_selected_order(message, context, order)
@@ -113,13 +113,17 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state, SHIPPING_ALREADY_SHIPPED)
         build_units.assert_not_called()
         self.assertEqual(context.user_data["shipping_draft"]["pending_order"], order)
-        self.assertIn("уже отмечен как «уехал»", message.edit_text.await_args.args[0])
+        self.assertEqual(
+            context.user_data["shipping_draft"]["pending_shipping_flag"],
+            "уедет",
+        )
+        self.assertIn("уже отмечен как «уедет»", message.edit_text.await_args.args[0])
 
     async def test_forced_shipping_preserves_already_shipped_flag(self):
         query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
         user = SimpleNamespace(id=7, full_name="Сотрудник", username="worker")
         draft = shipping_draft()
-        draft["already_shipped"] = True
+        draft["existing_shipping_flag"] = "уедет"
         context = SimpleNamespace(user_data={"shipping_draft": draft})
         client = object()
 
@@ -140,7 +144,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state, ConversationHandler.END)
         set_flag.assert_not_called()
-        self.assertIn("оставлено без изменений: уехал", query.edit_message_text.await_args.args[0])
+        self.assertIn("оставлено без изменений: уедет", query.edit_message_text.await_args.args[0])
 
     async def test_demand_creation_failure_keeps_review_and_does_not_save_codes(self):
         query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())

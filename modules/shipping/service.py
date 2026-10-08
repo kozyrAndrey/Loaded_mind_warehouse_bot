@@ -12,7 +12,7 @@ SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
 CDEK_ORDER_ATTRIBUTE_NAME = "Накладная СДЭК"
 CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
-ALREADY_SHIPPED_ORDER_ATTRIBUTE_VALUE = "уехал"
+SHIPPING_CONFIRMATION_ATTRIBUTE_VALUES = {"уедет", "уехал"}
 
 
 class ShippingValidationError(ValueError):
@@ -244,10 +244,8 @@ def get_order_shipping_flag(client, order_id):
 
 
 def order_is_already_shipped(value):
-    return (
-        str(value or "").strip().casefold().replace("ё", "е")
-        == ALREADY_SHIPPED_ORDER_ATTRIBUTE_VALUE
-    )
+    normalized = str(value or "").strip().casefold().replace("ё", "е")
+    return normalized in SHIPPING_CONFIRMATION_ATTRIBUTE_VALUES
 
 
 def new_demand_sync_id():

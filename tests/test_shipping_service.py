@@ -241,7 +241,8 @@ class ShippingOrderTests(unittest.TestCase):
 
         self.assertEqual(value, "УЕХАЛ")
         self.assertTrue(order_is_already_shipped(value))
-        self.assertFalse(order_is_already_shipped("уедет"))
+        self.assertTrue(order_is_already_shipped("уедет"))
+        self.assertFalse(order_is_already_shipped("ожидает"))
 
     def test_posted_demand_is_created_from_order_template_without_marking_codes(self):
         client = FakeClient()

@@ -192,10 +192,10 @@ async def order_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _prepare_selected_order(query.message, context, order)
 
 
-async def _prepare_selected_order(message, context, order, allow_already_shipped=False):
+async def _prepare_selected_order(message, context, order, confirmed_shipping_flag=""):
     try:
         client = build_moysklad_client()
-        if not allow_already_shipped:
+        if not confirmed_shipping_flag:
             shipping_flag = await asyncio.to_thread(
                 get_order_shipping_flag,
                 client,
@@ -203,8 +203,9 @@ async def _prepare_selected_order(message, context, order, allow_already_shipped
             )
             if order_is_already_shipped(shipping_flag):
                 _draft(context)["pending_order"] = order
+                _draft(context)["pending_shipping_flag"] = shipping_flag
                 await message.edit_text(
-                    f"⚠️ Заказ {order.get('name')} уже отмечен как «уехал».\n\n"
+                    f"⚠️ Заказ {order.get('name')} уже отмечен как «{shipping_flag}».\n\n"
                     "Всё равно начать новую отгрузку по этому заказу?",
                     reply_markup=_already_shipped_keyboard(),
                 )
@@ -234,7 +235,7 @@ async def _prepare_selected_order(message, context, order, allow_already_shipped
         "codes": [],
         "unmarked_count": prepared["unmarked_count"],
         "no_code_count": 0,
-        "already_shipped": bool(allow_already_shipped),
+        "existing_shipping_flag": str(confirmed_shipping_flag or "").strip(),
         "demand_sync_id": new_demand_sync_id(),
     }
     if not prepared["units"]:
@@ -247,6 +248,7 @@ async def already_shipped_continue(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     try:
         order = _draft(context).pop("pending_order")
+        shipping_flag = _draft(context).pop("pending_shipping_flag")
     except KeyError:
         await query.edit_message_text(
             "Состояние отгрузки потеряно. Начните заново.",
@@ -260,7 +262,7 @@ async def already_shipped_continue(update: Update, context: ContextTypes.DEFAULT
         query.message,
         context,
         order,
-        allow_already_shipped=True,
+        confirmed_shipping_flag=shipping_flag,
     )
 
 
@@ -404,7 +406,7 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     order_name = draft["order"]["name"]
     attribute_warning = ""
-    if not draft.get("already_shipped"):
+    if not draft.get("existing_shipping_flag"):
         try:
             await asyncio.to_thread(
                 set_order_shipping_flag,
@@ -419,9 +421,10 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     context.user_data.pop("shipping_draft", None)
     demand_name = str(demand.get("name") or demand.get("id") or "без номера")
+    existing_shipping_flag = str(draft.get("existing_shipping_flag") or "").strip()
     flag_result = (
-        "\nПоле заказа оставлено без изменений: уехал."
-        if draft.get("already_shipped")
+        f"\nПоле заказа оставлено без изменений: {existing_shipping_flag}."
+        if existing_shipping_flag
         else (attribute_warning or "\nПоле заказа обновлено: уедет.")
     )
     await query.edit_message_text(
