@@ -1,4 +1,6 @@
+import ast
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -34,6 +36,20 @@ class FakeJobQueue:
 
 
 class MorningJobsTests(unittest.TestCase):
+    def test_bot_startup_registers_task_jobs(self):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "bot.py").read_text())
+        main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+        setup_calls = [
+            node
+            for node in ast.walk(main)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setup_tasks_jobs"
+        ]
+
+        self.assertEqual(len(setup_calls), 1)
+        self.assertEqual(setup_calls[0].args[0].id, "app")
+
     def test_daily_messages_are_scheduled_one_hour_earlier(self):
         task_queue = FakeJobQueue()
         setup_tasks_jobs(SimpleNamespace(job_queue=task_queue))

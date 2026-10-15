@@ -38,7 +38,7 @@ from modules.returns.admin import get_loaded_mind_returns_admin_handler
 from modules.returns.storage import init_returns_storage
 from modules.schedule.google_sheets import init_schedule_sheet
 from modules.schedule.handlers import get_schedule_handlers
-from modules.tasks.handlers import get_tasks_handlers
+from modules.tasks.handlers import get_tasks_handlers, setup_tasks_jobs
 from modules.tasks.storage import init_tasks_storage
 from modules.shipping.handlers import get_shipping_handlers
 from modules.shipping.storage import init_shipping_storage
@@ -153,6 +153,11 @@ def main():
     app.add_handler(CallbackQueryHandler(show_shipping_menu, pattern=r"^section:shipping$"))
     app.add_handler(CallbackQueryHandler(show_marking_menu, pattern=r"^section:marking$"))
     app.add_handler(CallbackQueryHandler(show_employees_menu, pattern=r"^section:employees$"))
+
+    # Ежедневные сообщения со списком сотрудников и задач должны быть
+    # зарегистрированы до запуска polling. Раньше сами job-функции оставались
+    # в модуле задач, но этот setup при старте бота не вызывался.
+    setup_tasks_jobs(app)
 
     logging.info("Loaded Mind bot started")
     app.run_polling(bootstrap_retries=10)
