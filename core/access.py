@@ -154,7 +154,32 @@ async def role_guard(update, context):
     if data == "section:admin" or data.startswith("admin:"):
         allowed = has_any_role(employee, {"admin", "warehouse_manager"})
     elif data == "section:schedule" or data.startswith(("sch", "schemp:")):
-        allowed = has_any_role(employee, {"admin", "warehouse_manager"})
+        manager_schedule_callback = data.startswith(
+            (
+                "sch:view_all",
+                "sch:export_topic",
+                "sch:edit",
+                "sch:duties",
+                "schweek:",
+                "schemp:",
+                "schedit",
+                "schduty:",
+                "sch:back:manager_week",
+                "sch:back:edit_employee",
+                "sch:back:edit_day",
+                "sch:back:edit_action",
+            )
+        )
+        manager_schedule_flow = bool(
+            getattr(context, "user_data", {}).get("schedule_manager_action")
+        )
+        if manager_schedule_callback or manager_schedule_flow:
+            allowed = has_any_role(employee, {"admin", "warehouse_manager"})
+        else:
+            allowed = has_any_role(
+                employee,
+                {"admin", "warehouse_manager", "warehouse_employee"},
+            )
     elif data == "section:employees" or data.startswith("emp"):
         allowed = has_any_role(employee, {"admin", "warehouse_manager", "brand_manager"})
     elif module_for_callback(data) == "tasks":

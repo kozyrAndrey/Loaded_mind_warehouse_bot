@@ -25,13 +25,16 @@ def build_reply_main_keyboard(employee, enabled_modules=None):
         from core.module_control import enabled_module_keys
         enabled_modules = enabled_module_keys()
     manager = has_any_role(employee, {"warehouse_manager", "admin"})
+    schedule_user = has_any_role(employee, {"warehouse_employee", "warehouse_manager", "admin"})
     staff_manager = has_any_role(employee, {"warehouse_manager", "brand_manager", "admin"})
     tasks_manager = has_any_role(employee, {"warehouse_manager", "brand_manager", "admin"})
     labels = []
     for label, module_key in REPLY_MENU.items():
         if module_key != "admin" and module_key not in enabled_modules:
             continue
-        if module_key in {"schedule", "admin"} and not manager:
+        if module_key == "schedule" and not schedule_user:
+            continue
+        if module_key == "admin" and not manager:
             continue
         if module_key == "employees" and not staff_manager:
             continue

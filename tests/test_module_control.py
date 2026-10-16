@@ -73,6 +73,40 @@ class ModuleKeyboardTests(unittest.TestCase):
 
 
 class ModuleGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_employee_can_use_schedule_callbacks(self):
+        query = SimpleNamespace(data="sch:create", answer=AsyncMock())
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=42, username="employee"),
+        )
+
+        with patch(
+            "core.access.find_registered_employee",
+            return_value={"roles": ["warehouse_employee"], "role": "warehouse_employee"},
+        ):
+            await role_guard(update, SimpleNamespace())
+
+        query.answer.assert_not_awaited()
+
+    async def test_employee_cannot_use_manager_schedule_callbacks(self):
+        query = SimpleNamespace(data="sch:edit", answer=AsyncMock())
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=42, username="employee"),
+        )
+
+        with patch(
+            "core.access.find_registered_employee",
+            return_value={"roles": ["warehouse_employee"], "role": "warehouse_employee"},
+        ):
+            with self.assertRaises(ApplicationHandlerStop):
+                await role_guard(update, SimpleNamespace(user_data={}))
+
+        query.answer.assert_awaited_once_with(
+            "⛔️ Недостаточно прав для этого раздела.",
+            show_alert=True,
+        )
+
     async def test_employee_cannot_use_old_task_callback(self):
         query = SimpleNamespace(data="task:add", answer=AsyncMock())
         update = SimpleNamespace(

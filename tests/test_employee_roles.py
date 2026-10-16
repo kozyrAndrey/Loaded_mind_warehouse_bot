@@ -27,13 +27,13 @@ class EmployeeRolesTests(unittest.TestCase):
         self.assertTrue(can_manage_additional_pay(employee))
         self.assertTrue(has_any_role(employee, {"admin", "brand_manager"}))
 
-    def test_employee_cannot_compose_schedule(self):
+    def test_employee_can_submit_own_schedule(self):
         employee = {
             "role": "warehouse_employee",
             "roles": "warehouse_employee,operations",
             "is_active": True,
         }
-        self.assertFalse(can_employee_submit_schedule(employee))
+        self.assertTrue(can_employee_submit_schedule(employee))
         self.assertFalse(has_role(employee, "operations"))
         self.assertEqual(primary_role(employee_roles(employee)), "warehouse_employee")
         self.assertEqual(roles_to_storage(employee["roles"]), "warehouse_employee")

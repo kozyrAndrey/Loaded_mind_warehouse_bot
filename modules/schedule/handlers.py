@@ -78,6 +78,11 @@ def schedule_menu_keyboard(employee):
     manager = is_schedule_manager(employee)
     rows = []
 
+    if can_employee_submit_schedule(employee):
+        rows.append(
+            [InlineKeyboardButton("🗓 Заполнить свое расписание", callback_data="sch:create")]
+        )
+
     if manager:
         rows.extend(
             [
@@ -555,10 +560,35 @@ async def schedule_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    caller = current_employee(update)
     employee = get_employee_by_id(context.user_data["schedule_employee_id"])
     week_start = parse_date(context.user_data["schedule_week_start"])
+
+    owns_submission = bool(
+        caller
+        and employee
+        and str(caller.get("employee_id", "")) == str(employee.get("employee_id", ""))
+    )
+    if not can_employee_submit_schedule(caller) or (
+        not owns_submission and not is_schedule_manager(caller)
+    ):
+        context.user_data.clear()
+        await query.edit_message_text(
+            "Недостаточно прав для сохранения расписания.",
+            reply_markup=schedule_menu_keyboard(caller) if caller else build_main_menu_keyboard(),
+        )
+        return ConversationHandler.END
+
+    if schedule_has_submission(employee["employee_id"], week_start) and not is_schedule_manager(caller):
+        context.user_data.clear()
+        await query.edit_message_text(
+            "Вы уже отправили расписание на следующую неделю. Для изменения обратитесь к руководителю.",
+            reply_markup=schedule_menu_keyboard(caller),
+        )
+        return ConversationHandler.END
+
     shifts = context.user_data.get("schedule_shifts", {})
-    updated_by = employee["full_name"] if employee else str(update.effective_user.id)
+    updated_by = caller.get("full_name") or str(update.effective_user.id)
 
     upsert_employee_week_schedule(employee, week_start, shifts, updated_by)
     context.user_data.clear()

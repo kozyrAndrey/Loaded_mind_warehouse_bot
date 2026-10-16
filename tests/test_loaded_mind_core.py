@@ -130,13 +130,13 @@ class ReceivingReportTests(unittest.TestCase):
 
 
 class KeyboardTests(unittest.TestCase):
-    def test_schedule_and_admin_are_manager_only(self):
+    def test_schedule_is_available_to_warehouse_employee_but_admin_is_manager_only(self):
         enabled = {"receiving", "returns", "consumables", "marking", "payroll", "schedule", "employees", "tasks"}
         employee = {"roles": ["warehouse_employee"], "role": "warehouse_employee"}
         manager = {"roles": ["warehouse_manager"], "role": "warehouse_manager"}
         staff_labels = [button.text for row in build_reply_main_keyboard(employee, enabled).keyboard for button in row]
         manager_labels = [button.text for row in build_reply_main_keyboard(manager, enabled).keyboard for button in row]
-        self.assertNotIn("📅 Расписание", staff_labels)
+        self.assertIn("📅 Расписание", staff_labels)
         self.assertNotIn("🧩 Задачи", staff_labels)
         self.assertNotIn("⚙️ Управление ботом", staff_labels)
         self.assertIn("📅 Расписание", manager_labels)

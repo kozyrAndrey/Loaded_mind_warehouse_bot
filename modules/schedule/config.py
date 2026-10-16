@@ -84,7 +84,7 @@ def can_employee_submit_schedule(employee):
     return bool(
         employee
         and employee.get("is_active")
-        and has_any_role(employee, {"warehouse_manager", "admin"})
+        and has_any_role(employee, {"warehouse_employee", "warehouse_manager", "admin"})
     )
 
 

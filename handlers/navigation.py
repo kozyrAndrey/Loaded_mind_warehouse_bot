@@ -23,10 +23,14 @@ async def open_reply_section(update, context):
 
     employee = find_employee_for_telegram_user(update.effective_user)
     manager = has_any_role(employee, {"warehouse_manager", "admin"})
+    schedule_user = has_any_role(employee, {"warehouse_employee", "warehouse_manager", "admin"})
     if not employee or not employee.get("is_active"):
         await update.message.reply_text("⛔️ Доступ к боту не предоставлен. Пришлите администратору ваш /whoami.")
         return ConversationHandler.END
-    if module_key in {"schedule", "admin"} and not manager:
+    if module_key == "schedule" and not schedule_user:
+        await update.message.reply_text("⛔️ Этот раздел доступен сотрудникам склада и руководителям.")
+        return ConversationHandler.END
+    if module_key == "admin" and not manager:
         await update.message.reply_text("⛔️ Этот раздел доступен руководителю склада и администратору.")
         return ConversationHandler.END
     if module_key == "employees" and not is_manager(employee):
