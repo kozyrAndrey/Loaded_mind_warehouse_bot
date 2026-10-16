@@ -1,10 +1,12 @@
 import logging
+from html import escape
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
 
-from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
-from modules.employees.roles import has_role
+from modules.payroll.google_sheets import find_employee_for_telegram_user, get_employees, is_manager
+from modules.employees.roles import has_any_role, has_role
 from modules.receiving.postgres_storage import get_last_records_text, get_receiving_db_status
 from core.keyboards import (
     build_employees_menu_keyboard,
@@ -18,6 +20,72 @@ from core.keyboards import (
     build_reply_main_keyboard,
     build_start_keyboard,
 )
+
+
+WAREHOUSE_STAFF_COMMAND_ROLES = {"admin", "warehouse_manager", "brand_manager"}
+
+
+def build_warehouse_staff_mentions(employees):
+    mentions = []
+    missing_contacts = []
+    seen = set()
+
+    for employee in employees:
+        if not employee.get("is_active") or not has_role(employee, "warehouse_employee"):
+            continue
+
+        username = str(employee.get("telegram_username") or "").strip().lstrip("@")
+        telegram_user_id = str(employee.get("telegram_user_id") or "").strip()
+        name = str(employee.get("full_name") or "Сотрудник").strip()
+
+        identity = username.lower() or telegram_user_id or str(employee.get("employee_id") or "").strip()
+        if identity and identity in seen:
+            continue
+        if identity:
+            seen.add(identity)
+
+        if username:
+            mentions.append(f"@{escape(username)}")
+        elif telegram_user_id.isdigit():
+            mentions.append(f'<a href="tg://user?id={telegram_user_id}">{escape(name)}</a>')
+        else:
+            missing_contacts.append(name)
+
+    if not mentions and not missing_contacts:
+        return "Активные сотрудники склада не найдены."
+
+    lines = ["📣 Сотрудники склада:", "", " ".join(mentions) or "—"]
+    if missing_contacts:
+        lines.extend([
+            "",
+            "Не удалось отметить — не заполнены Telegram username и user ID:",
+            *[f"• {escape(name)}" for name in missing_contacts],
+        ])
+    return "\n".join(lines)
+
+
+async def mention_warehouse_staff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat or update.effective_chat.type not in {"group", "supergroup"}:
+        await update.effective_message.reply_text("Используйте эту команду в групповом чате.")
+        return
+
+    caller = find_employee_for_telegram_user(update.effective_user)
+    if not caller or not caller.get("is_active") or not has_any_role(caller, WAREHOUSE_STAFF_COMMAND_ROLES):
+        await update.effective_message.reply_text("⛔️ Массово отмечать сотрудников могут только руководители.")
+        return
+
+    try:
+        employees = get_employees(include_inactive=False)
+    except Exception:
+        logging.exception("Не удалось получить сотрудников склада для массового упоминания")
+        await update.effective_message.reply_text("Не удалось загрузить список сотрудников. Попробуйте позже.")
+        return
+
+    await update.effective_message.reply_text(
+        build_warehouse_staff_mentions(employees),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

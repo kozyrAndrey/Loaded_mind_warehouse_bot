@@ -17,6 +17,7 @@ from core.module_control import init_module_control_storage, module_access_guard
 from handlers.common import (
     db_status, show_main_menu, show_receiving_menu, show_returns_menu,
     show_marking_menu, show_employees_menu, show_shipping_menu, start, whereami,
+    mention_warehouse_staff,
 )
 from handlers.navigation import open_reply_section
 from modules.admin_panel.handlers import get_admin_panel_handlers
@@ -130,6 +131,7 @@ def main():
 
     app.add_handler(CommandHandler(["start", "menu"], start))
     app.add_handler(CommandHandler(["whereami", "wehereami"], whereami))
+    app.add_handler(CommandHandler(["warehouse_staff", "sklad"], mention_warehouse_staff))
     app.add_handler(CommandHandler("db_status", db_status))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & filters.Regex(menu_pattern), open_reply_section))
 
