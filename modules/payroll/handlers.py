@@ -949,55 +949,93 @@ async def send_manager_report_to_recipients(
     if not brand_managers:
         raise RuntimeError("Не найден активный руководитель бренда с telegram_user_id.")
 
-    if own_target is not None:
-        if hasattr(own_target, "edit_message_text"):
-            result = await own_target.edit_message_text(chunks[0], reply_markup=own_reply_markup)
-            message = result if hasattr(result, "message_id") else getattr(own_target, "message", None)
-        else:
-            message = await own_target.reply_text(chunks[0], reply_markup=own_reply_markup)
-        if message and getattr(message, "message_id", None):
-            messages.append(
-                {
-                    "recipient": "warehouse_manager",
-                    "chat_id": int(getattr(message, "chat_id", 0) or employee_user_id),
-                    "message_id": message.message_id,
-                }
-            )
-        for chunk in chunks[1:]:
-            message = await context.bot.send_message(chat_id=int(employee_user_id), text=chunk)
-            messages.append(
-                {
-                    "recipient": "warehouse_manager",
-                    "chat_id": int(employee_user_id),
-                    "message_id": message.message_id,
-                }
-            )
-    else:
-        for chunk in chunks:
-            message = await context.bot.send_message(chat_id=int(employee_user_id), text=chunk)
-            messages.append(
-                {
-                    "recipient": "warehouse_manager",
-                    "chat_id": int(employee_user_id),
-                    "message_id": message.message_id,
-                }
-            )
-
+    # Руководитель бренда — основной получатель руководительского отчета.
+    # Отправляем ему первым, чтобы ошибка доставки копии автору отчета не
+    # помешала доставить сам отчет адресату.
     delivered_brand_manager_ids = set()
+    failed_brand_manager_ids = []
     for brand_manager in brand_managers:
         recipient_id = str(brand_manager.get("telegram_user_id", "")).strip()
         if not recipient_id or recipient_id == employee_user_id or recipient_id in delivered_brand_manager_ids:
             continue
-        delivered_brand_manager_ids.add(recipient_id)
-        for chunk in chunks:
-            message = await context.bot.send_message(chat_id=int(recipient_id), text=chunk)
+        try:
+            recipient_messages = []
+            for chunk in chunks:
+                message = await context.bot.send_message(chat_id=int(recipient_id), text=chunk)
+                recipient_messages.append(
+                    {
+                        "recipient": "brand_manager",
+                        "chat_id": int(recipient_id),
+                        "message_id": message.message_id,
+                    }
+                )
+            messages.extend(recipient_messages)
+            delivered_brand_manager_ids.add(recipient_id)
+        except Exception as error:
+            failed_brand_manager_ids.append(recipient_id)
             messages.append(
                 {
                     "recipient": "brand_manager",
                     "chat_id": int(recipient_id),
-                    "message_id": message.message_id,
+                    "error": str(error),
                 }
             )
+            logging.exception(
+                "Не удалось отправить руководительский отчет руководителю бренда %s",
+                recipient_id,
+            )
+
+    if not delivered_brand_manager_ids:
+        failed = ", ".join(failed_brand_manager_ids) or "неизвестный получатель"
+        raise RuntimeError(
+            f"Руководительский отчет не доставлен ни одному руководителю бренда ({failed})."
+        )
+
+    try:
+        if own_target is not None:
+            if hasattr(own_target, "edit_message_text"):
+                result = await own_target.edit_message_text(chunks[0], reply_markup=own_reply_markup)
+                message = result if hasattr(result, "message_id") else getattr(own_target, "message", None)
+            else:
+                message = await own_target.reply_text(chunks[0], reply_markup=own_reply_markup)
+            if message and getattr(message, "message_id", None):
+                messages.append(
+                    {
+                        "recipient": "warehouse_manager",
+                        "chat_id": int(getattr(message, "chat_id", 0) or employee_user_id),
+                        "message_id": message.message_id,
+                    }
+                )
+            for chunk in chunks[1:]:
+                message = await context.bot.send_message(chat_id=int(employee_user_id), text=chunk)
+                messages.append(
+                    {
+                        "recipient": "warehouse_manager",
+                        "chat_id": int(employee_user_id),
+                        "message_id": message.message_id,
+                    }
+                )
+        else:
+            for chunk in chunks:
+                message = await context.bot.send_message(chat_id=int(employee_user_id), text=chunk)
+                messages.append(
+                    {
+                        "recipient": "warehouse_manager",
+                        "chat_id": int(employee_user_id),
+                        "message_id": message.message_id,
+                    }
+                )
+    except Exception as error:
+        messages.append(
+            {
+                "recipient": "warehouse_manager",
+                "chat_id": int(employee_user_id),
+                "error": str(error),
+            }
+        )
+        logging.exception(
+            "Руководительский отчет доставлен руководителю бренда, но копия руководителю склада не отправлена"
+        )
 
     return messages
 
@@ -2198,7 +2236,13 @@ async def finish_create_report(target, context: ContextTypes.DEFAULT_TYPE, teleg
                 manager_report,
             )
             append_manager_report(employee, report_date, manager_report, telegram_messages)
-            status = "Складской и руководительский отчеты сохранены и отправлены отдельными сообщениями ✅"
+            if any(message.get("error") for message in telegram_messages):
+                status = (
+                    "Складской и руководительский отчеты сохранены; руководительский отчет "
+                    "доставлен руководителю бренда, но одна из дополнительных копий не отправлена ⚠️"
+                )
+            else:
+                status = "Складской и руководительский отчеты сохранены и отправлены отдельными сообщениями ✅"
         except Exception as error:
             logging.exception("Складской отчет сохранен, но руководительский отчет не отправлен")
             warning = f"Складской отчет сохранен, но руководительский отчет не отправлен ⚠️\nОшибка: {error}"

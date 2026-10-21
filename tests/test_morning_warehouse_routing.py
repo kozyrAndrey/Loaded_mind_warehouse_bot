@@ -55,7 +55,7 @@ class MorningWarehouseRoutingTests(IsolatedAsyncioTestCase):
 
         with (
             patch("modules.tasks.handlers.GROUP_CHAT_ID", "-100123"),
-            patch("modules.tasks.handlers.WAREHOUSE_TOPIC_ID", "456"),
+            patch("modules.tasks.handlers.WAREHOUSE_MAIN_TOPIC", "456"),
             patch("modules.tasks.handlers.is_module_enabled", return_value=True),
             patch("modules.tasks.handlers.today_msk", return_value=date(2026, 10, 16)),
             patch(
@@ -81,7 +81,7 @@ class MorningWarehouseRoutingTests(IsolatedAsyncioTestCase):
 
         with (
             patch("modules.tasks.handlers.GROUP_CHAT_ID", "-100123"),
-            patch("modules.tasks.handlers.WAREHOUSE_TOPIC_ID", "456"),
+            patch("modules.tasks.handlers.WAREHOUSE_MAIN_TOPIC", "456"),
             patch("modules.tasks.handlers.materialize_templates_for_date"),
             patch("modules.tasks.handlers.assign_working_employees_to_unassigned_template_tasks"),
             patch("modules.tasks.handlers.get_tasks_by_date", return_value=[]),

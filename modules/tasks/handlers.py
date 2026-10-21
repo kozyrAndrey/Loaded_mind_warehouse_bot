@@ -6,7 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Upda
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
-from config import GROUP_CHAT_ID, WAREHOUSE_TOPIC_ID
+from config import GROUP_CHAT_ID, WAREHOUSE_MAIN_TOPIC
 from core.keyboards import build_main_menu_keyboard
 from core.module_control import is_module_enabled
 from modules.payroll.google_sheets import find_employee_for_telegram_user, get_employees
@@ -1383,8 +1383,8 @@ async def send_or_edit_task_message(context, day, export_type, chat_id, thread_i
 
 
 async def export_warehouse_tasks_for_date(context, day):
-    if not GROUP_CHAT_ID or not WAREHOUSE_TOPIC_ID:
-        return "не настроены GROUP_CHAT_ID или WAREHOUSE_TOPIC_ID"
+    if not GROUP_CHAT_ID or not WAREHOUSE_MAIN_TOPIC:
+        return "не настроены GROUP_CHAT_ID или WAREHOUSE_MAIN_TOPIC"
     materialize_templates_for_date(day)
     assign_working_employees_to_unassigned_template_tasks(day)
     tasks = get_tasks_by_date(day)
@@ -1393,7 +1393,7 @@ async def export_warehouse_tasks_for_date(context, day):
         day,
         "warehouse",
         GROUP_CHAT_ID,
-        WAREHOUSE_TOPIC_ID,
+        WAREHOUSE_MAIN_TOPIC,
         format_warehouse_tasks_message(day, tasks),
         warehouse_tasks_inline_keyboard(tasks),
     )
@@ -1466,13 +1466,13 @@ async def export_tasks_for_date(context, day):
 
 async def refresh_existing_exports_for_date(context, day):
     tasks = get_tasks_by_date(day)
-    if get_task_export(day, "warehouse") and GROUP_CHAT_ID and WAREHOUSE_TOPIC_ID:
+    if get_task_export(day, "warehouse") and GROUP_CHAT_ID and WAREHOUSE_MAIN_TOPIC:
         await send_or_edit_task_message(
             context,
             day,
             "warehouse",
             GROUP_CHAT_ID,
-            WAREHOUSE_TOPIC_ID,
+            WAREHOUSE_MAIN_TOPIC,
             format_warehouse_tasks_message(day, tasks),
             warehouse_tasks_inline_keyboard(tasks),
         )
@@ -1525,15 +1525,15 @@ async def task_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def daily_staff_job(context: ContextTypes.DEFAULT_TYPE):
     if not is_module_enabled("schedule"):
         return
-    if not GROUP_CHAT_ID or not WAREHOUSE_TOPIC_ID:
-        logging.warning("Не настроены GROUP_CHAT_ID или WAREHOUSE_TOPIC_ID для утренней выгрузки склада")
+    if not GROUP_CHAT_ID or not WAREHOUSE_MAIN_TOPIC:
+        logging.warning("Не настроены GROUP_CHAT_ID или WAREHOUSE_MAIN_TOPIC для утренней выгрузки склада")
         return
     day = today_msk()
     week_start = day - timedelta(days=day.weekday())
     employees, dates, schedule, duty_by_date = get_schedule_matrix(week_start)
     await context.bot.send_message(
         chat_id=int(GROUP_CHAT_ID),
-        message_thread_id=int(WAREHOUSE_TOPIC_ID),
+        message_thread_id=int(WAREHOUSE_MAIN_TOPIC),
         text=format_daily_staff_message(day, employees, schedule, duty_by_date),
     )
 

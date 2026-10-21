@@ -12,6 +12,7 @@ from modules.payroll.handlers import (
     remember_manager_wizard_state,
     restore_manager_wizard_state,
     send_daily_report_to_private_target,
+    send_manager_report_to_recipients,
     validate_manager_wizard_value,
 )
 
@@ -201,12 +202,77 @@ class PayrollManagerReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Складские задачи", warehouse_text)
         self.assertNotIn("Руководительский отчет", warehouse_text)
         self.assertEqual(context.bot.send_message.await_count, 2)
-        manager_call, brand_call = context.bot.send_message.await_args_list
-        self.assertEqual(manager_call.kwargs["chat_id"], 42)
+        brand_call, manager_call = context.bot.send_message.await_args_list
         self.assertEqual(brand_call.kwargs["chat_id"], 77)
+        self.assertEqual(manager_call.kwargs["chat_id"], 42)
         self.assertIn("Руководительский отчет", manager_call.kwargs["text"])
         append_manager.assert_called_once()
         self.refresh_summary.assert_awaited_once_with(context, "16.07.2026")
+
+    async def test_brand_manager_delivery_survives_warehouse_manager_copy_failure(self):
+        context = SimpleNamespace(
+            bot=SimpleNamespace(
+                send_message=AsyncMock(
+                    side_effect=[
+                        SimpleNamespace(message_id=301),
+                        RuntimeError("warehouse delivery failed"),
+                    ]
+                )
+            )
+        )
+        brand_manager = {
+            "employee_id": "brand",
+            "full_name": "Руководитель бренда",
+            "telegram_user_id": "77",
+            "role": "brand_manager",
+        }
+
+        with patch("modules.payroll.handlers.get_brand_managers", return_value=[brand_manager]):
+            with self.assertLogs(level="ERROR"):
+                messages = await send_manager_report_to_recipients(
+                    context,
+                    warehouse_manager(),
+                    "16.07.2026",
+                    {"volumes": "готово"},
+                )
+
+        first_call, second_call = context.bot.send_message.await_args_list
+        self.assertEqual(first_call.kwargs["chat_id"], 77)
+        self.assertEqual(second_call.kwargs["chat_id"], 42)
+        self.assertEqual(messages[0]["recipient"], "brand_manager")
+        self.assertEqual(messages[1]["recipient"], "warehouse_manager")
+        self.assertEqual(messages[1]["error"], "warehouse delivery failed")
+
+    async def test_stale_brand_manager_id_does_not_block_valid_recipient(self):
+        context = SimpleNamespace(
+            bot=SimpleNamespace(
+                send_message=AsyncMock(
+                    side_effect=[
+                        RuntimeError("stale chat"),
+                        SimpleNamespace(message_id=302),
+                        SimpleNamespace(message_id=303),
+                    ]
+                )
+            )
+        )
+        recipients = [
+            {"telegram_user_id": "66", "role": "brand_manager"},
+            {"telegram_user_id": "77", "role": "brand_manager"},
+        ]
+
+        with patch("modules.payroll.handlers.get_brand_managers", return_value=recipients):
+            with self.assertLogs(level="ERROR"):
+                messages = await send_manager_report_to_recipients(
+                    context,
+                    warehouse_manager(),
+                    "16.07.2026",
+                    {"volumes": "готово"},
+                )
+
+        chat_ids = [call.kwargs["chat_id"] for call in context.bot.send_message.await_args_list]
+        self.assertEqual(chat_ids, [66, 77, 42])
+        self.assertTrue(any(message.get("chat_id") == 77 and message.get("message_id") == 302 for message in messages))
+        self.assertTrue(any(message.get("chat_id") == 66 and message.get("error") == "stale chat" for message in messages))
 
     async def test_own_edited_report_reuses_current_bot_message(self):
         edited_message = SimpleNamespace(chat_id=42, message_id=303)
