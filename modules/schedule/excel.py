@@ -18,6 +18,14 @@ WHITE_FILL = PatternFill("solid", fgColor="FFFFFF")
 def create_schedule_xlsx(week_start, output_path):
     output_path = Path(output_path)
     employees, dates, schedule, duty_by_date = get_schedule_matrix(week_start)
+    employees = [
+        employee
+        for employee in employees
+        if any(
+            str(schedule.get(employee["employee_id"], {}).get(date_to_str(day), "")).strip()
+            for day in dates
+        )
+    ]
 
     wb = Workbook()
     ws = wb.active

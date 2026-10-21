@@ -1,7 +1,9 @@
 import unittest
 import uuid
 from decimal import Decimal
+from unittest.mock import MagicMock
 
+from modules.moysklad.client import MoySkladError
 from modules.shipping.service import (
     CDEK_ORDER_ATTRIBUTE_NAME,
     ShippingServiceError,
@@ -300,6 +302,110 @@ class ShippingOrderTests(unittest.TestCase):
         self.assertNotIn("payedSum", payload)
         self.assertNotIn("files", payload)
         self.assertEqual(str(uuid.UUID(payload["syncId"])), sync_id)
+
+    def test_old_demand_is_unposted_and_moved_to_trash_after_replacement(self):
+        sync_id = "11111111-1111-4111-8111-111111111111"
+        client = MagicMock()
+        client.get_entity.return_value = {
+            "id": "order-1",
+            "meta": {"href": "order-href"},
+            "demands": [{"meta": {"href": "old-href", "type": "demand"}}],
+        }
+        client.get_href.return_value = {
+            "id": "old-demand",
+            "name": "00001",
+            "syncId": "22222222-2222-4222-8222-222222222222",
+            "applicable": True,
+        }
+        client.put.return_value = {
+            "positions": {"rows": [{
+                "quantity": 1,
+                "price": 100000,
+                "assortment": {"meta": {"href": "product-href"}},
+            }]},
+        }
+        client.create_entity.return_value = {
+            "id": "new-demand",
+            "name": "00002",
+            "applicable": True,
+        }
+
+        result = create_posted_demand_from_order(client, "order-1", sync_id)
+
+        client.update_entity.assert_called_once_with(
+            "demand", "old-demand", {"applicable": False},
+        )
+        client.move_entity_to_trash.assert_called_once_with("demand", "old-demand")
+        self.assertEqual(result["_replaced_demands"], ["00001"])
+
+    def test_retry_reuses_current_demand_and_removes_only_old_demands(self):
+        sync_id = "11111111-1111-4111-8111-111111111111"
+        client = MagicMock()
+        client.get_entity.return_value = {
+            "id": "order-1",
+            "meta": {"href": "order-href"},
+            "demands": [
+                {"meta": {"href": "current-href", "type": "demand"}},
+                {"meta": {"href": "old-href", "type": "demand"}},
+            ],
+        }
+        client.get_href.side_effect = [
+            {
+                "id": "current-demand",
+                "name": "00002",
+                "syncId": sync_id,
+                "applicable": True,
+            },
+            {
+                "id": "old-demand",
+                "name": "00001",
+                "syncId": "22222222-2222-4222-8222-222222222222",
+                "applicable": False,
+            },
+        ]
+
+        result = create_posted_demand_from_order(client, "order-1", sync_id)
+
+        client.put.assert_not_called()
+        client.create_entity.assert_not_called()
+        client.update_entity.assert_not_called()
+        client.move_entity_to_trash.assert_called_once_with("demand", "old-demand")
+        self.assertEqual(result["id"], "current-demand")
+
+    def test_old_demand_is_restored_when_new_demand_creation_fails(self):
+        sync_id = "11111111-1111-4111-8111-111111111111"
+        client = MagicMock()
+        client.get_entity.return_value = {
+            "id": "order-1",
+            "meta": {"href": "order-href"},
+            "demands": [{"meta": {"href": "old-href", "type": "demand"}}],
+        }
+        client.get_href.return_value = {
+            "id": "old-demand",
+            "name": "00001",
+            "syncId": "22222222-2222-4222-8222-222222222222",
+            "applicable": True,
+        }
+        client.put.return_value = {
+            "positions": {"rows": [{
+                "quantity": 1,
+                "price": 100000,
+                "assortment": {"meta": {"href": "product-href"}},
+            }]},
+        }
+        client.create_entity.side_effect = MoySkladError("create failed")
+
+        with self.assertRaisesRegex(ShippingServiceError, "Не удалось создать новую отгрузку"):
+            create_posted_demand_from_order(client, "order-1", sync_id)
+
+        self.assertEqual(
+            client.update_entity.call_args_list,
+            [
+                unittest.mock.call("demand", "old-demand", {"applicable": False}),
+                unittest.mock.call("demand", "old-demand", {"applicable": True}),
+            ],
+        )
+        client.move_entity_to_trash.assert_not_called()
 
 
 class ShippingMarkingTests(unittest.TestCase):

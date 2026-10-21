@@ -62,6 +62,8 @@ class MoySkladClient:
             raise MoySkladError(f"Не удалось подключиться к МоемуСкладу: {error}") from error
 
         try:
+            if not raw.strip():
+                return {}
             return json.loads(raw)
         except json.JSONDecodeError as error:
             raise MoySkladError("МойСклад вернул невалидный JSON.") from error
@@ -106,6 +108,9 @@ class MoySkladClient:
             payload,
             params=params or {},
         )
+
+    def move_entity_to_trash(self, entity_type, entity_id):
+        return self.post(f"entity/{entity_type}/{entity_id}/trash")
 
     def get_positions(self, entity_type, entity_id, params=None):
         return self.get(f"entity/{entity_type}/{entity_id}/positions", params=params or {})

@@ -50,6 +50,24 @@ class MoySkladClientWriteTests(unittest.TestCase):
         })
         self.assertEqual(result, {"id": "demand-1", "applicable": True})
 
+    def test_move_entity_to_trash_accepts_empty_response(self):
+        response = MagicMock()
+        response.headers = {}
+        response.read.return_value = b""
+        response.__enter__.return_value = response
+        client = MoySkladClient("token", base_url="https://api.example.test")
+
+        with patch("modules.moysklad.client.urlopen", return_value=response) as urlopen:
+            result = client.move_entity_to_trash("demand", "demand-1")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(
+            request.full_url,
+            "https://api.example.test/entity/demand/demand-1/trash",
+        )
+        self.assertEqual(result, {})
+
 
 if __name__ == "__main__":
     unittest.main()

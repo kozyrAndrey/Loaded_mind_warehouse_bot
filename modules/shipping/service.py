@@ -327,21 +327,104 @@ def _demand_create_payload(template, sync_id):
     return payload
 
 
+def _linked_order_demands(client, order):
+    demands = []
+    for reference in order.get("demands") or []:
+        meta = dict((reference or {}).get("meta") or {})
+        if str(meta.get("type") or "") != "demand" or not meta.get("href"):
+            continue
+        try:
+            demand = client.get_href(meta["href"])
+        except MoySkladError as error:
+            raise ShippingServiceError(str(error)) from error
+        demand_id = str(demand.get("id") or "").strip()
+        if demand_id:
+            demands.append(demand)
+    return demands
+
+
+def _restore_demand_states(client, demands):
+    errors = []
+    for demand in demands:
+        demand_id = str(demand.get("id") or "").strip()
+        try:
+            client.update_entity(
+                "demand",
+                demand_id,
+                {"applicable": bool(demand.get("applicable"))},
+            )
+        except MoySkladError as error:
+            errors.append(str(error))
+    return errors
+
+
 def create_posted_demand_from_order(client, order_id, sync_id):
     order_id = str(order_id or "").strip()
     if not order_id:
         raise ShippingServiceError("У заказа отсутствует идентификатор «МойСклад».")
+    normalized_sync_id = _validated_sync_id(sync_id)
     try:
         order = client.get_entity("customerorder", order_id)
         order_meta = dict(order.get("meta") or {})
         if not order_meta.get("href"):
             raise ShippingServiceError("У заказа отсутствуют метаданные «МойСклад».")
-        template = client.put(
-            "entity/demand/new",
-            {"customerOrder": {"meta": order_meta}},
+        linked_demands = _linked_order_demands(client, order)
+        current_demand = next(
+            (
+                demand for demand in linked_demands
+                if str(demand.get("syncId") or "") == normalized_sync_id
+            ),
+            None,
         )
-        payload = _demand_create_payload(template, sync_id)
-        demand = client.create_entity("demand", payload)
+        old_demands = [
+            demand for demand in linked_demands
+            if demand is not current_demand
+        ]
+
+        template = None
+        if current_demand is None:
+            template = client.put(
+                "entity/demand/new",
+                {"customerOrder": {"meta": order_meta}},
+            )
+
+        changed_demands = []
+        try:
+            for old_demand in old_demands:
+                if not old_demand.get("applicable"):
+                    continue
+                client.update_entity(
+                    "demand",
+                    old_demand["id"],
+                    {"applicable": False},
+                )
+                changed_demands.append(old_demand)
+        except MoySkladError as error:
+            restore_errors = _restore_demand_states(client, changed_demands)
+            suffix = (
+                f" Ошибки восстановления: {'; '.join(restore_errors)}"
+                if restore_errors else ""
+            )
+            raise ShippingServiceError(
+                f"Не удалось снять старую отгрузку с проведения: {error}.{suffix}"
+            ) from error
+
+        if current_demand is None:
+            try:
+                payload = _demand_create_payload(template, normalized_sync_id)
+                demand = client.create_entity("demand", payload)
+            except MoySkladError as error:
+                restore_errors = _restore_demand_states(client, changed_demands)
+                suffix = (
+                    f" Ошибки восстановления: {'; '.join(restore_errors)}"
+                    if restore_errors else ""
+                )
+                raise ShippingServiceError(
+                    f"Не удалось создать новую отгрузку: {error}.{suffix}"
+                ) from error
+        else:
+            demand = current_demand
+
         demand_id = str((demand or {}).get("id") or "").strip()
         if not demand_id:
             raise ShippingServiceError("«МойСклад» создал отгрузку без идентификатора.")
@@ -353,7 +436,24 @@ def create_posted_demand_from_order(client, order_id, sync_id):
             )
         if not demand.get("applicable"):
             raise ShippingServiceError("Созданную отгрузку не удалось провести.")
-        return demand
+
+        replaced_names = []
+        for old_demand in old_demands:
+            old_id = str(old_demand.get("id") or "").strip()
+            old_name = str(old_demand.get("name") or old_id).strip()
+            try:
+                client.move_entity_to_trash("demand", old_id)
+            except MoySkladError as error:
+                raise ShippingServiceError(
+                    f"Новая отгрузка {demand.get('name') or demand_id} создана и проведена, "
+                    f"но старую отгрузку {old_name} не удалось удалить: {error}. "
+                    "Повторите завершение отгрузки."
+                ) from error
+            replaced_names.append(old_name)
+
+        result = dict(demand)
+        result["_replaced_demands"] = replaced_names
+        return result
     except ShippingServiceError:
         raise
     except MoySkladError as error:
