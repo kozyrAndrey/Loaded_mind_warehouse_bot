@@ -120,6 +120,15 @@ def load_day_reports(report_date, draft=None, include_manager_reports=False):
     }
 
 
+def submitted_reports_snapshot(report_date):
+    """Return only reports that were actually submitted for the date.
+
+    Brand delivery is triggered by the warehouse manager's report, so roster
+    membership and report completeness must not affect this snapshot.
+    """
+    return {"reports": reports_for_date(report_date)}
+
+
 def report_coverage_text(day):
     expected_ids = {str(employee["employee_id"]) for employee in day["expected"]}
     saved_count = len(expected_ids & day["saved_ids"])
@@ -151,15 +160,12 @@ def completed_tasks_text(tasks):
 
 def format_daily_summary(report_date, day):
     reports = day["reports"]
-    lines = [f"📊 Отчеты склада за {report_date}",
-             f"Отчитались по расписанию: {len(day['expected']) - len(day['missing'])} из {len(day['expected'])}"]
-    if day["missing"]:
-        lines.append("Ожидаются отчеты: " + ", ".join(employee["full_name"] for employee in day["missing"]))
-    expected_ids = {str(employee["employee_id"]) for employee in day["expected"]}
+    lines = [
+        f"📊 Отчеты склада за {report_date}",
+        f"Сдано отчетов: {len(reports)}",
+    ]
     for employee_id, row in sorted(reports.items(), key=lambda pair: (pair[1].get("ФИО", ""), pair[0])):
         name = row.get("ФИО") or employee_id
-        if employee_id not in expected_ids:
-            name += " (вне расписания)"
         lines.extend(["", name, f"Время работы: {row.get('Рабочий промежуток') or '—'}",
                       f"Обед: {row.get('Обед') or 0} ч.",
                       f"Отработано часов: {row.get('Отработано часов') or 0}",

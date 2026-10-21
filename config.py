@@ -52,9 +52,6 @@ SPECIAL_RECEIVING_REPORT_TOPIC_ID = os.getenv("SPECIAL_RECEIVING_REPORT_TOPIC_ID
 
 PAYROLL_GOOGLE_SHEET_ID = os.getenv("PAYROLL_GOOGLE_SHEET_ID", "")
 PAYROLL_REPORT_TOPIC_ID = os.getenv("PAYROLL_REPORT_TOPIC_ID", "")
-AUTO_DAILY_SUMMARY_ENABLED = os.getenv("AUTO_DAILY_SUMMARY_ENABLED", "false").lower() in {"1", "true", "yes"}
-
-
 # ============================================================
 # НАСТРОЙКИ МОДУЛЯ РАСХОДНИКОВ
 # ============================================================

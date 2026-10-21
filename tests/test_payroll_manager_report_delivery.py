@@ -122,7 +122,7 @@ class PayrollManagerReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
         target.reply_text.assert_awaited_once()
         context.bot.send_message.assert_not_awaited()
         self.assertEqual(context.user_data, {})
-        self.refresh_summary.assert_awaited_once_with(context, "16.07.2026")
+        self.refresh_summary.assert_not_awaited()
         telegram_data = append_report.call_args.args[-1]
         self.assertEqual(
             telegram_data,
@@ -325,7 +325,7 @@ class PayrollManagerReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
         saved_report = update_report.call_args.args[1]
         self.assertEqual(saved_report["telegram_chat_id"], 42)
         self.assertEqual(saved_report["telegram_message_id"], 303)
-        self.refresh_summary.assert_awaited_once_with(context, "16.07.2026")
+        self.refresh_summary.assert_not_awaited()
 
 
 if __name__ == "__main__":

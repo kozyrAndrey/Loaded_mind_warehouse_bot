@@ -2218,7 +2218,6 @@ async def finish_create_report(target, context: ContextTypes.DEFAULT_TYPE, teleg
             lunch_hours=lunch_hours,
         )
         report_saved = True
-        await refresh_daily_summary(context, report_date)
         if is_warehouse_manager(employee):
             status = "Складской отчет сохранен и отправлен в личные сообщения ✅"
         else:
@@ -2236,6 +2235,7 @@ async def finish_create_report(target, context: ContextTypes.DEFAULT_TYPE, teleg
                 manager_report,
             )
             append_manager_report(employee, report_date, manager_report, telegram_messages)
+            await refresh_daily_summary(context, report_date)
             if any(message.get("error") for message in telegram_messages):
                 status = (
                     "Складской и руководительский отчеты сохранены; руководительский отчет "
@@ -2495,7 +2495,6 @@ async def edit_report_delete_confirmed(update: Update, context: ContextTypes.DEF
         context.user_data.clear()
         return ConversationHandler.END
     await delete_old_report_message(context, deleted)
-    await refresh_daily_summary(context, deleted["date"])
     manager = is_manager(current_employee_or_none(update))
     context.user_data.clear()
     await query.edit_message_text(
@@ -2840,8 +2839,6 @@ async def finish_edit_report(query, context: ContextTypes.DEFAULT_TYPE, telegram
         original_date = context.user_data.get("edit_original_date")
         if original_date and original_date != model["date"]:
             delete_daily_kpi_row(original_date, report_data.get("ФИО", ""))
-            await refresh_daily_summary(context, original_date)
-        await refresh_daily_summary(context, model["date"])
         if is_warehouse_manager(model.get("employee")):
             status = "Отчет обновлен и новое сообщение отправлено руководителю склада в личные сообщения ✅"
         else:

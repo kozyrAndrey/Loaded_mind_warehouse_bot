@@ -40,7 +40,7 @@ class DailyReportManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state, EDIT_FIELD)
         self.assertEqual(report["Дата"], "08.09.2026")
 
-    async def test_delete_removes_saved_report_message_and_refreshes_summary(self):
+    async def test_delete_removes_saved_report_message_without_exporting_summary(self):
         query = SimpleNamespace(
             answer=AsyncMock(),
             edit_message_text=AsyncMock(),
@@ -66,4 +66,4 @@ class DailyReportManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state, ConversationHandler.END)
         delete_message.assert_awaited_once()
         delete_report.assert_called_once_with(2)
-        refresh.assert_awaited_once_with(context, "07.09.2026")
+        refresh.assert_not_awaited()

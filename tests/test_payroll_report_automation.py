@@ -106,6 +106,17 @@ class ReportAggregationTests(unittest.TestCase):
         self.assertEqual("".join(chunks), text)
         self.assertTrue(all(len(chunk.encode("utf-16-le")) // 2 <= 3800 for chunk in chunks))
 
+    def test_brand_snapshot_uses_submitted_reports_without_schedule(self):
+        reports = {"a": row("a", kpi("kpi007", 10))}
+        with (
+            patch.object(automation, "reports_for_date", return_value=reports),
+            patch.object(automation, "get_working_employees_for_date") as schedule,
+        ):
+            snapshot = automation.submitted_reports_snapshot(REPORT_DATE)
+
+        self.assertEqual(snapshot, {"reports": reports})
+        schedule.assert_not_called()
+
 
 class ManagerSuggestionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -191,21 +202,11 @@ class DailySummaryDeliveryTests(unittest.IsolatedAsyncioTestCase):
         Base.metadata.create_all(self.engine, tables=[delivery.DailySummary.__table__])
         self.factory = sessionmaker(bind=self.engine, expire_on_commit=False)
         self.addCleanup(self.engine.dispose)
-        self.employees = [employee("a"), employee("manager", "warehouse_manager")]
         self.reports = {"a": row("a", kpi("kpi007", 10))}
-        self.manager_report_ids = set()
         self.recipients = [employee("brand", "brand_manager", "77")]
         patches = [
-            patch("config.AUTO_DAILY_SUMMARY_ENABLED", True),
-            patch.object(delivery, "is_module_enabled", return_value=True),
             patch.object(delivery, "session_scope", self.session_scope),
             patch.object(automation, "reports_for_date", side_effect=lambda _: dict(self.reports)),
-            patch.object(
-                automation,
-                "manager_report_ids_for_date",
-                side_effect=lambda _: set(self.manager_report_ids),
-            ),
-            patch.object(automation, "get_working_employees_for_date", side_effect=lambda _: self.employees),
             patch.object(delivery, "get_employees", side_effect=lambda **_: self.recipients),
         ]
         for mock in patches:
@@ -226,61 +227,53 @@ class DailySummaryDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 session.rollback()
                 raise
 
-    async def test_waits_for_working_manager_then_sends_totals_and_updates_in_place(self):
+    async def test_manager_trigger_sends_all_submitted_reports_immediately(self):
         await delivery.refresh_daily_summary(self.context, REPORT_DATE)
-        self.context.bot.send_message.assert_not_awaited()
-        self.reports["manager"] = row("manager", kpi("kpi007", 5))
-        await delivery.retry_daily_summaries(self.context)
+
         self.context.bot.send_message.assert_awaited_once()
         sent = self.context.bot.send_message.await_args.kwargs
         self.assertEqual(sent["chat_id"], 77)
-        self.assertIn("Отправка: 15", sent["text"])
+        self.assertIn("Сдано отчетов: 1", sent["text"])
+        self.assertIn("Отправка: 10", sent["text"])
+        self.assertNotIn("расписан", sent["text"].casefold())
+
+    async def test_empty_submitted_report_set_is_still_exported(self):
+        self.reports = {}
+
         await delivery.refresh_daily_summary(self.context, REPORT_DATE)
+
+        text = self.context.bot.send_message.await_args.kwargs["text"]
+        self.assertIn("Сдано отчетов: 0", text)
+        self.assertIn("ИТОГО KPI", text)
+
+    async def test_unchanged_explicit_export_is_not_duplicated(self):
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
+
         self.context.bot.send_message.assert_awaited_once()
         self.context.bot.edit_message_text.assert_not_awaited()
+
+    async def test_second_explicit_trigger_updates_existing_export(self):
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.reports["a"] = row("a", kpi("kpi007", 12))
         await delivery.refresh_daily_summary(self.context, REPORT_DATE)
-        self.assertIn("Отправка: 17", self.context.bot.edit_message_text.await_args.kwargs["text"])
+
+        self.assertIn("Отправка: 12", self.context.bot.edit_message_text.await_args.kwargs["text"])
         self.context.bot.send_message.assert_awaited_once()
 
-    async def test_manager_only_report_sends_employee_summary_without_manager_daily_report(self):
-        self.manager_report_ids.add("manager")
-
-        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
-
-        self.context.bot.send_message.assert_awaited_once()
-        text = self.context.bot.send_message.await_args.kwargs["text"]
-        self.assertIn("Отправка: 10", text)
-        self.assertNotIn("\nmanager\n", text)
-
-    async def test_off_schedule_manager_report_can_close_day_with_daily_reports(self):
-        self.employees = []
-        self.manager_report_ids.add("manager")
-
-        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
-
-        self.context.bot.send_message.assert_awaited_once()
-        self.assertIn("Отправка: 10", self.context.bot.send_message.await_args.kwargs["text"])
-
-    async def test_no_schedule_never_means_everyone_reported(self):
-        self.employees = []
-        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
-        self.context.bot.send_message.assert_not_awaited()
-
-    async def test_failed_edit_is_retried_without_sending_new_summary(self):
-        self.reports["manager"] = row("manager")
+    async def test_failed_edit_can_be_retried_by_an_explicit_trigger(self):
         await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.reports["a"] = row("a", kpi("kpi007", 20))
         self.context.bot.edit_message_text.side_effect = TimedOut()
         with self.assertLogs(level="ERROR"):
             await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.context.bot.edit_message_text.side_effect = None
-        await delivery.retry_daily_summaries(self.context)
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
+
         self.context.bot.send_message.assert_awaited_once()
         self.assertIn("Отправка: 20", delivery.summary_state(DAY)["77"][0]["text"])
 
-    async def test_retries_failed_recipient_without_resending_successful_copy(self):
-        self.reports["manager"] = row("manager")
+    async def test_next_explicit_trigger_retries_only_failed_recipient(self):
         self.recipients.append(employee("brand2", "brand_manager", "88"))
         self.context.bot.send_message.side_effect = [SimpleNamespace(message_id=1), TimedOut()]
         with self.assertLogs(level="ERROR"):
@@ -288,33 +281,34 @@ class DailySummaryDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(delivery.summary_state(DAY)["77"])
         self.context.bot.send_message.reset_mock(side_effect=True)
         self.context.bot.send_message.return_value = SimpleNamespace(message_id=2)
-        await delivery.retry_daily_summaries(self.context)
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
+
         self.context.bot.send_message.assert_awaited_once()
         self.assertEqual(self.context.bot.send_message.await_args.kwargs["chat_id"], 88)
 
-    async def test_long_report_retry_and_shortened_report_remove_obsolete_parts(self):
-        self.reports["manager"] = row("manager")
+    async def test_long_report_and_shortened_report_remove_obsolete_parts(self):
         self.reports["a"]["Задачи"] = "x" * 9000
         self.context.bot.send_message.side_effect = [SimpleNamespace(message_id=1), TimedOut()]
         with self.assertLogs(level="ERROR"):
             await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.assertEqual(len(delivery.summary_state(DAY)["77"]), 1)
         self.context.bot.send_message.side_effect = [SimpleNamespace(message_id=n) for n in range(2, 10)]
-        await delivery.retry_daily_summaries(self.context)
+        await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.assertGreater(len(delivery.summary_state(DAY)["77"]), 1)
         self.reports["a"]["Задачи"] = "Кратко"
         await delivery.refresh_daily_summary(self.context, REPORT_DATE)
         self.assertEqual(len(delivery.summary_state(DAY)["77"]), 1)
         self.context.bot.delete_message.assert_awaited()
 
-    async def test_off_schedule_report_included_and_parallel_checks_do_not_duplicate(self):
+    async def test_all_submitted_reports_are_included_without_schedule_labels(self):
         import asyncio
-        self.reports["manager"] = row("manager")
         self.reports["extra"] = row("extra", kpi("kpi007", 4))
         await asyncio.gather(*(delivery.refresh_daily_summary(self.context, REPORT_DATE) for _ in range(3)))
+
         self.context.bot.send_message.assert_awaited_once()
         text = self.context.bot.send_message.await_args.kwargs["text"]
-        self.assertIn("extra (вне расписания)", text)
+        self.assertIn("\nextra\n", text)
+        self.assertNotIn("вне расписания", text)
         self.assertIn("Отправка: 14", text)
 
 
