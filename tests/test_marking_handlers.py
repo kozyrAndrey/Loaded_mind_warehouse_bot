@@ -27,6 +27,7 @@ from modules.marking.handlers import (
     catalog_file_received,
     catalog_import_confirm_keyboard,
     catalog_import_confirmed,
+    generate_trend_export,
 )
 
 
@@ -250,6 +251,40 @@ class MarkingHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Есть ли немаркируемая продукция",
             message.reply_text.await_args.args[0],
         )
+
+    async def test_trend_export_finishes_status_before_sending_reply_keyboard(self):
+        status_message = SimpleNamespace(edit_text=AsyncMock())
+        query = SimpleNamespace(edit_message_text=AsyncMock(return_value=status_message))
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_chat=SimpleNamespace(id=123),
+        )
+        context = SimpleNamespace(
+            user_data={
+                "marking_trend_document_name": "Вывод из оборота № 15",
+                "marking_trend_price_type": "Цена продажи",
+                "marking_trend_unmarked_quantities": {},
+            },
+            bot=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        with (
+            patch("modules.marking.handlers.selected_unmarked_products", return_value=[]),
+            patch("modules.marking.handlers.build_moysklad_client", return_value=object()),
+            patch(
+                "modules.marking.handlers.get_retireorder_export_rows",
+                return_value=({"name": "Вывод из оборота № 15"}, []),
+            ),
+            patch("modules.marking.handlers.ensure_manager", return_value=True),
+        ):
+            state = await generate_trend_export(update, context)
+
+        self.assertEqual(state, ConversationHandler.END)
+        status_message.edit_text.assert_awaited_once_with(
+            "В документе не найдено позиций для выгрузки."
+        )
+        self.assertNotIn("reply_markup", status_message.edit_text.await_args.kwargs)
+        self.assertIn("reply_markup", context.bot.send_message.await_args.kwargs)
 
     async def test_quantity_is_saved_and_returns_to_product_choice(self):
         product = {

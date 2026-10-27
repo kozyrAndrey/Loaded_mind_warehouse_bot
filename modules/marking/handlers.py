@@ -176,6 +176,17 @@ def marking_menu_keyboard(update: Update):
     return build_marking_menu_keyboard(manager=ensure_manager(update))
 
 
+async def finish_status_message(update, context, status_message, text, reply_markup=None):
+    """Finish an editable status and install a reply keyboard in a new message."""
+    await status_message.edit_text(text)
+    if reply_markup is not None:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Выберите действие:",
+            reply_markup=reply_markup,
+        )
+
+
 async def trend_export_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -214,9 +225,12 @@ async def stock_codes_export_document_received(update: Update, context: ContextT
         document, rows = get_retireorder_export_rows(client, document_name)
         codes_count = sum(len(item.get("codes") or []) for item in rows)
         if not codes_count:
-            await status_message.edit_text(
+            await finish_status_message(
+                update,
+                context,
+                status_message,
                 "В документе не найдены коды маркировки.",
-                reply_markup=marking_menu_keyboard(update),
+                marking_menu_keyboard(update),
             )
             return ConversationHandler.END
 
@@ -235,20 +249,29 @@ async def stock_codes_export_document_received(update: Update, context: ContextT
                     f"Кодов: {codes_count}"
                 ),
             )
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             "Excel с кодами маркировки сформирован ✅",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
     except MoySkladError as error:
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось сформировать выгрузку:\n{error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
     except Exception as error:
         logging.exception("Ошибка формирования выгрузки кодов для стока")
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось сформировать выгрузку:\n{error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
     finally:
         remove_temporary_file(output_path, "Excel-выгрузки кодов для стока")
@@ -474,9 +497,12 @@ async def generate_trend_export(update: Update, context: ContextTypes.DEFAULT_TY
             sale_price_type=price_type,
         )
         if not rows:
-            await status_message.edit_text(
+            await finish_status_message(
+                update,
+                context,
+                status_message,
                 "В документе не найдено позиций для выгрузки.",
-                reply_markup=marking_menu_keyboard(update),
+                marking_menu_keyboard(update),
             )
             return ConversationHandler.END
         catalog_names = get_honest_sign_names(item.get("gtin") for item in rows)
@@ -487,16 +513,22 @@ async def generate_trend_export(update: Update, context: ContextTypes.DEFAULT_TY
             existing_rows=rows,
         )
     except MoySkladError as error:
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось сформировать выгрузку:\n{error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
         return ConversationHandler.END
     except Exception as error:
         logging.exception("Ошибка получения данных маркировки из МойСклад")
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось сформировать выгрузку:\n{error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
         return ConversationHandler.END
 
@@ -587,9 +619,12 @@ async def generate_trend_export(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
 
-    await status_message.edit_text(
+    await finish_status_message(
+        update,
+        context,
+        status_message,
         "CSV для УПД и Excel для 1С сформированы ✅",
-        reply_markup=marking_menu_keyboard(update),
+        marking_menu_keyboard(update),
     )
     return ConversationHandler.END
 
@@ -608,7 +643,13 @@ async def send_validation_errors(update, context, status_message, errors, genera
     text = "\n".join(lines)
 
     if len(text) <= 3900:
-        await status_message.edit_text(text, reply_markup=marking_menu_keyboard(update))
+        await finish_status_message(
+            update,
+            context,
+            status_message,
+            text,
+            marking_menu_keyboard(update),
+        )
         return
 
     path = None
@@ -626,9 +667,12 @@ async def send_validation_errors(update, context, status_message, errors, genera
     finally:
         remove_temporary_file(path, "отчета об ошибках маркировки")
 
-    await status_message.edit_text(
+    await finish_status_message(
+        update,
+        context,
+        status_message,
         f"{short_status}. Найдено ошибок: {len(errors)}. Список отправлен отдельным файлом.",
-        reply_markup=marking_menu_keyboard(update),
+        marking_menu_keyboard(update),
     )
 
 
@@ -867,26 +911,40 @@ async def duplicate_chz_code_received(update: Update, context: ContextTypes.DEFA
                 caption=f"Дубликат ЧЗ {label_size.replace('x', '×')} мм ✅",
             )
     except DuplicateChzError as error:
-        await status_message.edit_text(str(error), reply_markup=marking_menu_keyboard(update))
+        await finish_status_message(
+            update, context, status_message, str(error), marking_menu_keyboard(update)
+        )
         return ConversationHandler.END
     except MoySkladError as error:
         logging.exception("Ошибка поиска товара для этикетки ЧЗ в МойСклад")
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось получить товар из МойСклад: {error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
         return ConversationHandler.END
     except Exception as error:
         logging.exception("Ошибка генерации дубликата ЧЗ")
-        await status_message.edit_text(
+        await finish_status_message(
+            update,
+            context,
+            status_message,
             f"Не удалось сформировать дубликат ЧЗ:\n{error}",
-            reply_markup=marking_menu_keyboard(update),
+            marking_menu_keyboard(update),
         )
         return ConversationHandler.END
     finally:
         remove_temporary_file(path, "PDF дубликата ЧЗ")
 
-    await status_message.edit_text("Дубликат ЧЗ сформирован ✅", reply_markup=marking_menu_keyboard(update))
+    await finish_status_message(
+        update,
+        context,
+        status_message,
+        "Дубликат ЧЗ сформирован ✅",
+        marking_menu_keyboard(update),
+    )
     return ConversationHandler.END
 
 
