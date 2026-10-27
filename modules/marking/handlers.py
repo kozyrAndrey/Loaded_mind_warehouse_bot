@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import tempfile
@@ -685,16 +686,18 @@ async def catalog_file_received(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         telegram_file = await context.bot.get_file(document.file_id)
         content = bytes(await telegram_file.download_as_bytearray())
-        result = parse_catalog_file(content, filename)
+        result = await asyncio.to_thread(parse_catalog_file, content, filename)
     except CatalogImportError as error:
-        await status_message.edit_text(
+        await status_message.edit_text("Проверка завершена с ошибкой.")
+        await update.message.reply_text(
             f"Таблица не принята:\n{error}",
             reply_markup=marking_cancel_keyboard(),
         )
         return MARKING_CATALOG_UPLOAD
     except Exception as error:
         logging.exception("Ошибка загрузки справочника Честного ЗНАКа")
-        await status_message.edit_text(
+        await status_message.edit_text("Проверка завершена с ошибкой.")
+        await update.message.reply_text(
             f"Не удалось обработать таблицу: {error}",
             reply_markup=marking_cancel_keyboard(),
         )
@@ -707,7 +710,8 @@ async def catalog_file_received(update: Update, context: ContextTypes.DEFAULT_TY
         for index, row in enumerate(result.rows[:10], start=1)
     )
     more = "" if len(result.rows) <= 10 else f"\n…и ещё {len(result.rows) - 10} позиций"
-    await status_message.edit_text(
+    await status_message.edit_text("Проверка завершена ✅")
+    await update.message.reply_text(
         "Таблица распознана ✅\n\n"
         f"Файл: {filename}\n"
         f"Лист: {result.source_name}\n"

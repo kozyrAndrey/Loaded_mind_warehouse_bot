@@ -3,6 +3,7 @@ import io
 import unittest
 
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 from modules.marking.catalog_import import CatalogImportError, parse_catalog_file
 
@@ -94,6 +95,19 @@ class MarkingCatalogImportTests(unittest.TestCase):
             parse_catalog_file(content, "catalog.xlsx")
 
         self.assertIn("не указано название", str(caught.exception))
+
+    def test_ignores_large_formatted_empty_tail(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["04670332742266", "HOODIE BLACK M"])
+        worksheet.append(["04670332742273", "HOODIE BLACK L"])
+        worksheet["A500000"].fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+        output = io.BytesIO()
+        workbook.save(output)
+
+        result = parse_catalog_file(output.getvalue(), "catalog.xlsx")
+
+        self.assertEqual(len(result.rows), 2)
 
 
 if __name__ == "__main__":

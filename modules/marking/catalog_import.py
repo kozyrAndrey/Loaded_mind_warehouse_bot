@@ -29,6 +29,7 @@ NAME_HEADERS = {
     "названиечестногознака",
 }
 MAX_ROWS = 20_000
+MAX_CONSECUTIVE_EMPTY_ROWS = 100
 
 
 class CatalogImportError(ValueError):
@@ -180,6 +181,26 @@ def _build_result(rows, source_name):
     )
 
 
+def _worksheet_rows(worksheet):
+    rows = []
+    consecutive_empty = 0
+    found_data = False
+    for row in worksheet.iter_rows(values_only=True):
+        values = list(row)
+        is_empty = not any(str(value or "").strip() for value in values)
+        rows.append(values)
+        if is_empty:
+            consecutive_empty += 1
+            if found_data and consecutive_empty >= MAX_CONSECUTIVE_EMPTY_ROWS:
+                break
+        else:
+            found_data = True
+            consecutive_empty = 0
+        if len(rows) > MAX_ROWS + 100:
+            raise CatalogImportError(f"На листе больше {MAX_ROWS} строк. Разделите справочник.")
+    return rows
+
+
 def parse_catalog_file(content, filename):
     suffix = str(filename or "").lower().rsplit(".", 1)[-1]
     if suffix == "xlsx":
@@ -189,8 +210,8 @@ def parse_catalog_file(content, filename):
             raise CatalogImportError(f"Не удалось открыть Excel-файл: {error}") from error
         sheet_errors = []
         for worksheet in workbook.worksheets:
-            rows = [list(row) for row in worksheet.iter_rows(values_only=True)]
             try:
+                rows = _worksheet_rows(worksheet)
                 return _build_result(rows, worksheet.title)
             except CatalogImportError as error:
                 sheet_errors.append(f"{worksheet.title}: {error}")

@@ -9,6 +9,7 @@ from modules.marking.handlers import (
     MARKING_DISCOUNTS,
     MARKING_DOCUMENT_NAME,
     MARKING_DUPLICATE_CHZ_CODE,
+    MARKING_CATALOG_IMPORT_CONFIRM,
     MARKING_STOCK_CODES_DOCUMENT_NAME,
     MARKING_UNMARKED_CONFIRM,
     MARKING_UNMARKED_PRODUCT,
@@ -23,6 +24,7 @@ from modules.marking.handlers import (
     stock_codes_export_start,
     trend_unmarked_quantity_received,
     catalog_start,
+    catalog_file_received,
 )
 
 
@@ -73,6 +75,39 @@ class MarkingHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state, ConversationHandler.END)
         self.assertIn("только руководителям", query.edit_message_text.await_args.args[0])
+
+    async def test_catalog_file_result_is_sent_as_new_reply_keyboard_message(self):
+        status_message = SimpleNamespace(edit_text=AsyncMock())
+        message = SimpleNamespace(
+            document=SimpleNamespace(
+                file_name="catalog.csv",
+                file_size=100,
+                file_id="file-id",
+            ),
+            reply_text=AsyncMock(return_value=status_message),
+        )
+        telegram_file = SimpleNamespace(
+            download_as_bytearray=AsyncMock(
+                return_value=bytearray(
+                    "04670332742266;HOODIE BLACK M\n04670332742273;HOODIE BLACK L\n",
+                    "utf-8",
+                )
+            )
+        )
+        context = SimpleNamespace(
+            user_data={},
+            bot=SimpleNamespace(get_file=AsyncMock(return_value=telegram_file)),
+        )
+
+        with patch("modules.marking.handlers.ensure_manager", return_value=True):
+            state = await catalog_file_received(SimpleNamespace(message=message), context)
+
+        self.assertEqual(state, MARKING_CATALOG_IMPORT_CONFIRM)
+        self.assertEqual(message.reply_text.await_count, 2)
+        result_call = message.reply_text.await_args_list[1]
+        self.assertIn("Таблица распознана", result_call.args[0])
+        self.assertIn("reply_markup", result_call.kwargs)
+        status_message.edit_text.assert_awaited_once_with("Проверка завершена ✅")
 
     async def test_stock_codes_export_is_available_without_manager_role(self):
         query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
