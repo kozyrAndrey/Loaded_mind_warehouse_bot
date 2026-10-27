@@ -14,6 +14,7 @@ from config import BOT_TOKEN
 from core.access import access_guard, role_guard
 from core.keyboards import REPLY_MENU
 from core.module_control import init_module_control_storage, module_access_guard
+from core.reply_callback import route_reply_callback
 from handlers.common import (
     db_status, show_main_menu, show_receiving_menu, show_returns_menu,
     show_marking_menu, show_employees_menu, show_shipping_menu, start, whereami,
@@ -117,6 +118,7 @@ def main():
 
     # Клавиатура в панели ввода работает из любого незавершённого диалога.
     menu_pattern = "^(?:" + "|".join(re.escape(label) for label in REPLY_MENU) + ")$"
+    app.add_handler(MessageHandler(filters.TEXT, route_reply_callback), group=-5)
     app.add_handler(CallbackQueryHandler(reset_conversations_on_navigation, pattern=r"^(section:|menu:start$)"), group=-4)
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(menu_pattern), reset_conversations_on_navigation), group=-4)
     app.add_handler(CommandHandler(["start", "menu"], reset_conversations_on_navigation), group=-4)

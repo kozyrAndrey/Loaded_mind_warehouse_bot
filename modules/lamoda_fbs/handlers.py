@@ -4,7 +4,8 @@ import re
 from datetime import datetime
 from io import BytesIO
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InputMediaPhoto, Update
+from telegram import InputFile, InputMediaPhoto, Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from openpyxl import load_workbook

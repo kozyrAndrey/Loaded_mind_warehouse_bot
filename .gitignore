@@ -16,6 +16,7 @@ tmp/
 
 # Excel exports
 *.xlsx
+!resources/trend_island_1c_template.xlsx
 
 # Google credentials
 google_credentials.json

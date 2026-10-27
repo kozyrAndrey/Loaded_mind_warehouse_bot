@@ -1,6 +1,7 @@
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram import InputMediaPhoto, Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,

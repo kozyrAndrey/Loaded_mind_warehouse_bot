@@ -2,7 +2,8 @@ import logging
 import tempfile
 from datetime import datetime, time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,

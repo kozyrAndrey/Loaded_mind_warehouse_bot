@@ -38,6 +38,7 @@ def normalize_gtin(value):
 def init_marking_storage():
     Base.metadata.create_all(get_engine(), tables=[HonestSignProduct.__table__])
     ensure_marking_storage_schema()
+    seed_honest_sign_products_if_empty()
 
 
 def ensure_marking_storage_schema():

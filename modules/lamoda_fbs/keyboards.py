@@ -1,4 +1,4 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def main_menu():

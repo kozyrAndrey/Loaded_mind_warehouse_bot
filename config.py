@@ -133,7 +133,9 @@ MOYSKLAD_SSL_VERIFY = os.getenv("MOYSKLAD_SSL_VERIFY", "true")
 
 MOYSKLAD_SALE_PRICE_TYPE = os.getenv("MOYSKLAD_SALE_PRICE_TYPE", "Цена продажи")
 
-MARKING_ONE_C_TEMPLATE_PATH = os.getenv("MARKING_ONE_C_TEMPLATE_PATH", "")
+MARKING_ONE_C_TEMPLATE_PATH = os.getenv("MARKING_ONE_C_TEMPLATE_PATH", "") or str(
+    BASE_DIR / "resources" / "trend_island_1c_template.xlsx"
+)
 MARKING_ONE_C_RETAIL_PRICE_TYPE = (
     os.getenv("MARKING_ONE_C_RETAIL_PRICE_TYPE", "") or MOYSKLAD_SALE_PRICE_TYPE
 )

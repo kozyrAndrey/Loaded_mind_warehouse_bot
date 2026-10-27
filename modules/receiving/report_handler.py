@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
 
 from config import GROUP_CHAT_ID, RECEIVING_REPORT_TOPIC_ID

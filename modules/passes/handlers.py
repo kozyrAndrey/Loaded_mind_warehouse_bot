@@ -5,7 +5,8 @@ from datetime import datetime
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InputFile, Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from modules.passes.pdf import CAPACITY_LABELS, create_visitor_pass_pdf

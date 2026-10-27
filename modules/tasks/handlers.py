@@ -2,7 +2,8 @@ import logging
 from datetime import time, timedelta
 from io import BytesIO
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InputFile, Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 

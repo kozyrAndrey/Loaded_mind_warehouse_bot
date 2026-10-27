@@ -1,6 +1,7 @@
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 
 from core.keyboards import build_main_menu_keyboard

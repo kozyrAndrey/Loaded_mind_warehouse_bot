@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager

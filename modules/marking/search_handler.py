@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from modules.moysklad.search import search_products

@@ -3,7 +3,8 @@ import logging
 from datetime import datetime
 from io import BytesIO
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InputFile, Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from core.keyboards import build_shipping_menu_keyboard

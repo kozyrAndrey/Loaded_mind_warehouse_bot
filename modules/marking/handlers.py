@@ -3,7 +3,8 @@ import os
 import tempfile
 from datetime import datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from core.keyboards import build_marking_menu_keyboard
@@ -898,6 +899,8 @@ def remove_temporary_file(path, description):
 def get_marking_handlers():
     conversation = ConversationHandler(
         entry_points=[
+            CallbackQueryHandler(trend_export_start, pattern=r"^marking:trend_export$"),
+            CallbackQueryHandler(stock_codes_export_start, pattern=r"^marking:stock_codes_export$"),
             CallbackQueryHandler(duplicate_chz_start, pattern=r"^marking:duplicate_chz(?:_75x120)?$"),
         ],
         states={

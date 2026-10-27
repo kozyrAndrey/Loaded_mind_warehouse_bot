@@ -4,7 +4,8 @@ import asyncio
 import io
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import InputMediaPhoto
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from config import GROUP_CHAT_ID, RETURNS_TOPIC_ID, SUPPORT_MANAGER_MENTION

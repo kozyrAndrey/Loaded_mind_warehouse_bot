@@ -1,7 +1,8 @@
 import logging
 from datetime import datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from config import GROUP_CHAT_ID, RECEIVING_REPORT_TOPIC_ID, SPECIAL_RECEIVING_REPORT_TOPIC_ID

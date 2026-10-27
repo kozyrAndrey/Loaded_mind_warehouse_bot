@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import KeyboardButton, ReplyKeyboardMarkup
+
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 
 from modules.receiving.products import CATEGORIES, SIZES
 from modules.employees.roles import has_any_role
@@ -64,6 +66,8 @@ def build_main_menu_keyboard(recruitment_tester=False, manager=False, admin=Fals
 
 def build_marking_menu_keyboard(manager=False):
     keyboard = [
+        [InlineKeyboardButton("📦 Выгрузка кодов для стока", callback_data="marking:stock_codes_export")],
+        [InlineKeyboardButton("📤 Файлы Trend Island (УПД + 1С)", callback_data="marking:trend_export")],
         [InlineKeyboardButton("🔎 Поиск товара / кода", callback_data="marking:search")],
         [InlineKeyboardButton("🏷 Дубликат ЧЗ 58×40", callback_data="marking:duplicate_chz")],
         [InlineKeyboardButton("🏷 Дубликат ЧЗ 75×120", callback_data="marking:duplicate_chz_75x120")],

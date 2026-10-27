@@ -37,8 +37,9 @@ class MarkingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("marking:search", callbacks)
         self.assertIn("marking:duplicate_chz", callbacks)
         self.assertIn("marking:duplicate_chz_75x120", callbacks)
+        self.assertIn("marking:stock_codes_export", callbacks)
+        self.assertIn("marking:trend_export", callbacks)
         self.assertNotIn("marking:catalog", callbacks)
-        self.assertNotIn("marking:trend_export", callbacks)
 
     async def test_large_duplicate_stores_75x120_format(self):
         query = SimpleNamespace(
