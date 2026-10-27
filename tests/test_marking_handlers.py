@@ -14,8 +14,6 @@ from modules.marking.handlers import (
     MARKING_UNMARKED_CONFIRM,
     MARKING_UNMARKED_PRODUCT,
     MARKING_UNMARKED_QUANTITY,
-    TREND_PRICE_TYPE_WITH_DISCOUNTS,
-    TREND_PRICE_TYPE_WITHOUT_DISCOUNTS,
     trend_export_back,
     trend_export_discounts_received,
     trend_export_document_received,
@@ -203,13 +201,13 @@ class MarkingHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_yes_selects_old_price(self):
         await self.assert_price_type_selected(
             callback_data="marking:trend_export:discounts:yes",
-            expected=TREND_PRICE_TYPE_WITH_DISCOUNTS,
+            expected="Цена по скидке",
         )
 
     async def test_no_selects_sale_price(self):
         await self.assert_price_type_selected(
             callback_data="marking:trend_export:discounts:no",
-            expected=TREND_PRICE_TYPE_WITHOUT_DISCOUNTS,
+            expected="Цена без скидки",
         )
 
     async def assert_price_type_selected(self, callback_data, expected):

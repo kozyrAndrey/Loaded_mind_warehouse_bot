@@ -52,8 +52,8 @@ from modules.payroll.google_sheets import find_employee_for_telegram_user, is_ma
 ) = range(1400, 1410)
 
 
-TREND_PRICE_TYPE_WITH_DISCOUNTS = "Старая цена"
-TREND_PRICE_TYPE_WITHOUT_DISCOUNTS = "Цена продажи"
+TREND_PRICE_TYPE_WITH_DISCOUNTS = "Цена по скидке"
+TREND_PRICE_TYPE_WITHOUT_DISCOUNTS = "Цена без скидки"
 
 
 def marking_cancel_keyboard():
