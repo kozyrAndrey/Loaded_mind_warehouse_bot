@@ -162,6 +162,26 @@ def expand_parent_product(client, assortment, cache):
     return cache[href]
 
 
+def expand_assortment(client, assortment, cache):
+    """Load a full variant/product when a document contains only its short reference."""
+    if not isinstance(assortment, dict):
+        return {}
+    characteristic_article = extract_characteristic_value(
+        assortment.get("characteristics"),
+        ARTICLE_CHARACTERISTIC_NAMES,
+    )
+    if characteristic_article or str(assortment.get("article") or "").strip():
+        return assortment
+
+    href = str((assortment.get("meta") or {}).get("href") or "").strip()
+    if not href:
+        return assortment
+    if href not in cache:
+        expanded = client.get_href(href, params={"expand": "product"})
+        cache[href] = expanded if isinstance(expanded, dict) else assortment
+    return cache[href]
+
+
 def extract_article(assortment, parent_product):
     characteristic_article = extract_characteristic_value(
         assortment.get("characteristics"),
@@ -256,6 +276,7 @@ def get_retireorder_export_rows(client, document_name, sale_price_type=MOYSKLAD_
     document_id = document["id"]
 
     result = []
+    assortment_cache = {}
     product_cache = {}
     reference_cache = {}
     for position in get_all_positions(client, "retireorder", document_id):
@@ -263,7 +284,11 @@ def get_retireorder_export_rows(client, document_name, sale_price_type=MOYSKLAD_
         if not position_id:
             continue
 
-        assortment = position.get("assortment") or {}
+        assortment = expand_assortment(
+            client,
+            position.get("assortment") or {},
+            assortment_cache,
+        )
         parent_product = expand_parent_product(client, assortment, product_cache)
         resolve_reference_attribute_descriptions(
             client,

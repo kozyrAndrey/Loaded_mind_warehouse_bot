@@ -13,6 +13,7 @@ from modules.marking.export import (
     create_stock_marking_codes_xlsx,
     create_trend_island_upd_csv,
     extract_article,
+    expand_assortment,
     extract_gtin,
     extract_sale_price,
     get_unmarked_moysklad_rows,
@@ -262,6 +263,40 @@ class MarkingUpdExportTests(unittest.TestCase):
         parent = {"article": "DS"}
 
         self.assertEqual(extract_article(assortment, parent), "DS-L")
+
+    def test_uses_built_in_variant_article_before_parent_article(self):
+        assortment = {"article": "FW26-27-LPB-S", "characteristics": []}
+        parent = {"article": "FW26-27-LPB"}
+
+        self.assertEqual(extract_article(assortment, parent), "FW26-27-LPB-S")
+
+    def test_expands_short_variant_reference_to_read_built_in_article(self):
+        href = "https://api.example.test/entity/variant/1"
+
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            def get_href(self, actual_href, params=None):
+                self.calls += 1
+                self_test.assertEqual(actual_href, href)
+                self_test.assertEqual(params, {"expand": "product"})
+                return {
+                    "name": "LEO PUFFER BLACK (S)",
+                    "article": "FW26-27-LPB-S",
+                }
+
+        self_test = self
+        client = Client()
+        cache = {}
+        short_reference = {"name": "LEO PUFFER BLACK (S)", "meta": {"href": href}}
+
+        first = expand_assortment(client, short_reference, cache)
+        second = expand_assortment(client, short_reference, cache)
+
+        self.assertEqual(first["article"], "FW26-27-LPB-S")
+        self.assertIs(first, second)
+        self.assertEqual(client.calls, 1)
 
     def test_normalize_gtin_uses_gtin14_for_matching(self):
         self.assertEqual(normalize_gtin("4670332744239"), "04670332744239")
