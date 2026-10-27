@@ -71,8 +71,12 @@ def build_marking_menu_keyboard(manager=False):
         [InlineKeyboardButton("🔎 Поиск товара / кода", callback_data="marking:search")],
         [InlineKeyboardButton("🏷 Дубликат ЧЗ 58×40", callback_data="marking:duplicate_chz")],
         [InlineKeyboardButton("🏷 Дубликат ЧЗ 75×120", callback_data="marking:duplicate_chz_75x120")],
-        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:start")],
     ]
+    if manager:
+        keyboard.append(
+            [InlineKeyboardButton("📚 Справочник Честного ЗНАКа", callback_data="marking:catalog")]
+        )
+    keyboard.append([InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:start")])
     return InlineKeyboardMarkup(keyboard)
 
 

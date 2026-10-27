@@ -8,6 +8,7 @@ from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from core.keyboards import build_marking_menu_keyboard
+from modules.marking.catalog_import import CatalogImportError, parse_catalog_file
 from modules.marking.duplicate_chz import (
     DuplicateChzError,
     create_duplicate_chz_75x120_pdf,
@@ -25,14 +26,11 @@ from modules.marking.export import (
 from modules.marking.moysklad_lookup import find_marking_product_info
 from modules.marking.one_c_export import OneCExportValidationError, create_one_c_xlsx
 from modules.marking.storage import (
-    delete_honest_sign_product,
     get_honest_sign_names,
-    get_honest_sign_product,
     get_unmarked_product,
     list_honest_sign_products,
     list_unmarked_products,
-    normalize_gtin,
-    upsert_honest_sign_product,
+    replace_honest_sign_products,
 )
 from modules.moysklad.client import MoySkladError
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
@@ -43,15 +41,13 @@ from modules.payroll.google_sheets import find_employee_for_telegram_user, is_ma
     MARKING_DOCUMENT_NAME,
     MARKING_DUPLICATE_CHZ_CODE,
     MARKING_CATALOG_MENU,
-    MARKING_CATALOG_GTIN,
-    MARKING_CATALOG_NAME,
-    MARKING_CATALOG_DELETE_GTIN,
-    MARKING_CATALOG_DELETE_CONFIRM,
     MARKING_UNMARKED_CONFIRM,
     MARKING_UNMARKED_PRODUCT,
     MARKING_UNMARKED_QUANTITY,
     MARKING_STOCK_CODES_DOCUMENT_NAME,
-) = range(1400, 1412)
+    MARKING_CATALOG_UPLOAD,
+    MARKING_CATALOG_IMPORT_CONFIRM,
+) = range(1400, 1410)
 
 
 TREND_PRICE_TYPE_WITH_DISCOUNTS = "Старая цена"
@@ -142,19 +138,23 @@ def trend_unmarked_products_keyboard(products, selected_quantities):
 def catalog_menu_keyboard():
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("➕ Добавить / изменить", callback_data="marking:catalog:upsert")],
-            [InlineKeyboardButton("🗑 Удалить", callback_data="marking:catalog:delete")],
+            [InlineKeyboardButton("📥 Загрузить таблицу", callback_data="marking:catalog:upload")],
             [InlineKeyboardButton("📤 Скачать справочник CSV", callback_data="marking:catalog:export")],
             [InlineKeyboardButton("⬅️ Назад", callback_data="marking:catalog:back")],
         ]
     )
 
 
-def catalog_delete_confirm_keyboard():
+def catalog_import_confirm_keyboard():
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🗑 Да, удалить", callback_data="marking:catalog:delete:confirm")],
-            [InlineKeyboardButton("⬅️ Нет", callback_data="marking:catalog:delete:cancel")],
+            [
+                InlineKeyboardButton(
+                    "✅ Заменить справочник",
+                    callback_data="marking:catalog:import:confirm",
+                )
+            ],
+            [InlineKeyboardButton("❌ Отмена", callback_data="marking:catalog:import:cancel")],
         ]
     )
 
@@ -638,122 +638,128 @@ async def catalog_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     marked_count = sum(1 for product in products if product.get("gtin"))
     unmarked_count = len(products) - marked_count
     await query.edit_message_text(
-        "Справочник номенклатуры\n\n"
+        "Справочник Честного ЗНАКа\n\n"
         f"Маркируемых товаров: {marked_count}\n"
         f"Немаркируемых товаров: {unmarked_count}\n"
-        "Маркируемые товары сопоставляются с МойСклад по GTIN.",
+        "Загрузите Excel или CSV с колонками GTIN и названием. "
+        "После проверки и подтверждения файл полностью заменит текущий справочник.",
         reply_markup=catalog_menu_keyboard(),
     )
     return MARKING_CATALOG_MENU
 
 
-async def catalog_upsert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def catalog_import_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    clear_catalog_import_context(context)
     await query.edit_message_text(
-        "Введите GTIN товара — 8, 12, 13 или 14 цифр:",
+        "Отправьте таблицу .xlsx или .csv размером до 10 МБ.\n\n"
+        "Бот сам найдёт строку заголовков и колонки GTIN/штрихкода и названия товара, "
+        "приведёт GTIN к 14 цифрам и проверит дубли. До подтверждения база не изменится.",
         reply_markup=marking_cancel_keyboard(),
     )
-    return MARKING_CATALOG_GTIN
+    return MARKING_CATALOG_UPLOAD
 
 
-async def catalog_gtin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        gtin = normalize_gtin(update.message.text)
-    except ValueError as error:
-        await update.message.reply_text(str(error), reply_markup=marking_cancel_keyboard())
-        return MARKING_CATALOG_GTIN
+async def catalog_file_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not ensure_manager(update):
+        await update.message.reply_text("⛔️ Управление справочником доступно только руководителям.")
+        return ConversationHandler.END
 
-    existing = get_honest_sign_product(gtin)
-    context.user_data["marking_catalog_gtin"] = gtin
-    prompt = f"Введите название товара в Честном ЗНАКе для GTIN {gtin}:"
-    if existing:
-        prompt = (
-            f"Текущее название для GTIN {gtin}:\n{existing['honest_sign_name']}\n\n"
-            "Введите новое название:"
-        )
-    await update.message.reply_text(prompt, reply_markup=marking_cancel_keyboard())
-    return MARKING_CATALOG_NAME
-
-
-async def catalog_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = (update.message.text or "").strip()
-    if not name:
+    document = update.message.document
+    filename = str(document.file_name or "catalog.xlsx")
+    if not filename.lower().endswith((".xlsx", ".csv")):
         await update.message.reply_text(
-            "Название не должно быть пустым. Введите название:",
+            "Поддерживаются только файлы .xlsx и .csv.",
             reply_markup=marking_cancel_keyboard(),
         )
-        return MARKING_CATALOG_NAME
-
-    gtin = context.user_data.get("marking_catalog_gtin")
-    try:
-        product, created = upsert_honest_sign_product(gtin, name)
-    except (RuntimeError, ValueError) as error:
+        return MARKING_CATALOG_UPLOAD
+    if int(document.file_size or 0) > 10 * 1024 * 1024:
         await update.message.reply_text(
-            f"Не удалось сохранить запись: {error}",
+            "Файл больше 10 МБ. Уменьшите таблицу и отправьте снова.",
+            reply_markup=marking_cancel_keyboard(),
+        )
+        return MARKING_CATALOG_UPLOAD
+
+    status_message = await update.message.reply_text("Проверяю структуру и данные таблицы...")
+    try:
+        telegram_file = await context.bot.get_file(document.file_id)
+        content = bytes(await telegram_file.download_as_bytearray())
+        result = parse_catalog_file(content, filename)
+    except CatalogImportError as error:
+        await status_message.edit_text(
+            f"Таблица не принята:\n{error}",
+            reply_markup=marking_cancel_keyboard(),
+        )
+        return MARKING_CATALOG_UPLOAD
+    except Exception as error:
+        logging.exception("Ошибка загрузки справочника Честного ЗНАКа")
+        await status_message.edit_text(
+            f"Не удалось обработать таблицу: {error}",
+            reply_markup=marking_cancel_keyboard(),
+        )
+        return MARKING_CATALOG_UPLOAD
+
+    context.user_data["marking_catalog_import_rows"] = result.rows
+    context.user_data["marking_catalog_import_filename"] = filename
+    preview = "\n".join(
+        f"{index}. {row['gtin']} — {row['honest_sign_name']}"
+        for index, row in enumerate(result.rows[:10], start=1)
+    )
+    more = "" if len(result.rows) <= 10 else f"\n…и ещё {len(result.rows) - 10} позиций"
+    await status_message.edit_text(
+        "Таблица распознана ✅\n\n"
+        f"Файл: {filename}\n"
+        f"Лист: {result.source_name}\n"
+        f"Строка заголовков: {result.header_row}\n"
+        f"GTIN: колонка {result.gtin_column}\n"
+        f"Название: колонка {result.name_column}\n"
+        f"Товаров: {len(result.rows)}\n\n"
+        f"Предпросмотр:\n{preview}{more}\n\n"
+        "После подтверждения текущий справочник будет полностью заменён.",
+        reply_markup=catalog_import_confirm_keyboard(),
+    )
+    return MARKING_CATALOG_IMPORT_CONFIRM
+
+
+async def catalog_import_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not ensure_manager(update):
+        await query.edit_message_text("⛔️ Управление справочником доступно только руководителям.")
+        return ConversationHandler.END
+    rows = context.user_data.get("marking_catalog_import_rows")
+    if not rows:
+        await query.edit_message_text(
+            "Черновик загрузки не найден. Отправьте таблицу ещё раз.",
             reply_markup=catalog_menu_keyboard(),
         )
         return MARKING_CATALOG_MENU
-    finally:
-        context.user_data.pop("marking_catalog_gtin", None)
-
-    action = "добавлена" if created else "обновлена"
-    await update.message.reply_text(
-        f"Запись {action} ✅\n\nGTIN: {product['gtin']}\nНазвание: {product['honest_sign_name']}",
+    try:
+        imported = replace_honest_sign_products(rows)
+    except (RuntimeError, ValueError) as error:
+        await query.edit_message_text(
+            f"Не удалось заменить справочник: {error}",
+            reply_markup=catalog_menu_keyboard(),
+        )
+        return MARKING_CATALOG_MENU
+    filename = context.user_data.get("marking_catalog_import_filename", "таблица")
+    clear_catalog_import_context(context)
+    await query.edit_message_text(
+        f"Справочник заменён ✅\nФайл: {filename}\nЗаписей в БД: {imported}.",
         reply_markup=catalog_menu_keyboard(),
     )
     return MARKING_CATALOG_MENU
 
 
-async def catalog_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def catalog_import_cancelled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    clear_catalog_import_context(context)
     await query.edit_message_text(
-        "Введите GTIN записи, которую нужно удалить:",
-        reply_markup=marking_cancel_keyboard(),
+        "Загрузка отменена. Справочник не изменён.",
+        reply_markup=catalog_menu_keyboard(),
     )
-    return MARKING_CATALOG_DELETE_GTIN
-
-
-async def catalog_delete_gtin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        product = get_honest_sign_product(update.message.text)
-    except ValueError as error:
-        await update.message.reply_text(str(error), reply_markup=marking_cancel_keyboard())
-        return MARKING_CATALOG_DELETE_GTIN
-
-    if not product:
-        await update.message.reply_text(
-            "Запись с таким GTIN не найдена.",
-            reply_markup=catalog_menu_keyboard(),
-        )
-        return MARKING_CATALOG_MENU
-
-    context.user_data["marking_catalog_delete_gtin"] = product["gtin"]
-    await update.message.reply_text(
-        "Удалить запись?\n\n"
-        f"GTIN: {product['gtin']}\n"
-        f"Название: {product['honest_sign_name']}",
-        reply_markup=catalog_delete_confirm_keyboard(),
-    )
-    return MARKING_CATALOG_DELETE_CONFIRM
-
-
-async def catalog_delete_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    gtin = context.user_data.pop("marking_catalog_delete_gtin", None)
-    deleted = delete_honest_sign_product(gtin) if gtin else False
-    text = "Запись удалена ✅" if deleted else "Запись уже отсутствует."
-    await query.edit_message_text(text, reply_markup=catalog_menu_keyboard())
-    return MARKING_CATALOG_MENU
-
-
-async def catalog_delete_cancelled(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data.pop("marking_catalog_delete_gtin", None)
-    await query.edit_message_text("Удаление отменено.", reply_markup=catalog_menu_keyboard())
     return MARKING_CATALOG_MENU
 
 
@@ -871,8 +877,12 @@ async def marking_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def clear_catalog_context(context):
-    context.user_data.pop("marking_catalog_gtin", None)
-    context.user_data.pop("marking_catalog_delete_gtin", None)
+    clear_catalog_import_context(context)
+
+
+def clear_catalog_import_context(context):
+    context.user_data.pop("marking_catalog_import_rows", None)
+    context.user_data.pop("marking_catalog_import_filename", None)
 
 
 def clear_trend_export_context(context):
@@ -902,6 +912,7 @@ def get_marking_handlers():
             CallbackQueryHandler(trend_export_start, pattern=r"^marking:trend_export$"),
             CallbackQueryHandler(stock_codes_export_start, pattern=r"^marking:stock_codes_export$"),
             CallbackQueryHandler(duplicate_chz_start, pattern=r"^marking:duplicate_chz(?:_75x120)?$"),
+            CallbackQueryHandler(catalog_start, pattern=r"^marking:catalog$"),
         ],
         states={
             MARKING_DISCOUNTS: [
@@ -969,26 +980,23 @@ def get_marking_handlers():
                 CallbackQueryHandler(marking_cancel, pattern=r"^marking:cancel$"),
             ],
             MARKING_CATALOG_MENU: [
-                CallbackQueryHandler(catalog_upsert_start, pattern=r"^marking:catalog:upsert$"),
-                CallbackQueryHandler(catalog_delete_start, pattern=r"^marking:catalog:delete$"),
+                CallbackQueryHandler(catalog_import_start, pattern=r"^marking:catalog:upload$"),
                 CallbackQueryHandler(catalog_export, pattern=r"^marking:catalog:export$"),
                 CallbackQueryHandler(catalog_back, pattern=r"^marking:catalog:back$"),
             ],
-            MARKING_CATALOG_GTIN: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, catalog_gtin_received),
+            MARKING_CATALOG_UPLOAD: [
+                MessageHandler(filters.Document.ALL, catalog_file_received),
                 CallbackQueryHandler(marking_cancel, pattern=r"^marking:cancel$"),
             ],
-            MARKING_CATALOG_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, catalog_name_received),
-                CallbackQueryHandler(marking_cancel, pattern=r"^marking:cancel$"),
-            ],
-            MARKING_CATALOG_DELETE_GTIN: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, catalog_delete_gtin_received),
-                CallbackQueryHandler(marking_cancel, pattern=r"^marking:cancel$"),
-            ],
-            MARKING_CATALOG_DELETE_CONFIRM: [
-                CallbackQueryHandler(catalog_delete_confirmed, pattern=r"^marking:catalog:delete:confirm$"),
-                CallbackQueryHandler(catalog_delete_cancelled, pattern=r"^marking:catalog:delete:cancel$"),
+            MARKING_CATALOG_IMPORT_CONFIRM: [
+                CallbackQueryHandler(
+                    catalog_import_confirmed,
+                    pattern=r"^marking:catalog:import:confirm$",
+                ),
+                CallbackQueryHandler(
+                    catalog_import_cancelled,
+                    pattern=r"^marking:catalog:import:cancel$",
+                ),
             ],
         },
         fallbacks=[

@@ -41,6 +41,15 @@ class MarkingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("marking:trend_export", callbacks)
         self.assertNotIn("marking:catalog", callbacks)
 
+    def test_manager_menu_contains_catalog_import(self):
+        callbacks = [
+            button.callback_data
+            for row in build_marking_menu_keyboard(manager=True).inline_keyboard
+            for button in row
+        ]
+
+        self.assertIn("marking:catalog", callbacks)
+
     async def test_large_duplicate_stores_75x120_format(self):
         query = SimpleNamespace(
             data="marking:duplicate_chz_75x120",

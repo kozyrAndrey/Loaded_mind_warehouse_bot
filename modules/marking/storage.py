@@ -1,15 +1,11 @@
-import csv
 from datetime import datetime
-from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, Text, select, text
+from sqlalchemy import DateTime, Integer, String, Text, delete, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from config import BASE_DIR
 from modules.storage.postgres import Base, get_engine, session_scope
 
 
-CATALOG_SEED_PATH = BASE_DIR / "resources" / "honest_sign_products.csv"
 GTIN_LENGTHS = {8, 12, 13, 14}
 
 
@@ -38,7 +34,6 @@ def normalize_gtin(value):
 def init_marking_storage():
     Base.metadata.create_all(get_engine(), tables=[HonestSignProduct.__table__])
     ensure_marking_storage_schema()
-    seed_honest_sign_products_if_empty()
 
 
 def ensure_marking_storage_schema():
@@ -126,28 +121,6 @@ def ensure_marking_storage_schema():
             connection.execute(text(statement))
 
 
-def seed_honest_sign_products_if_empty(seed_path=CATALOG_SEED_PATH):
-    seed_path = Path(seed_path)
-    if not seed_path.exists():
-        return 0
-
-    with seed_path.open("r", encoding="utf-8", newline="") as file:
-        rows = list(csv.DictReader(file))
-
-    marked_rows = [row for row in rows if str(row.get("gtin") or "").strip()]
-    unmarked_rows = [row for row in rows if not str(row.get("gtin") or "").strip()]
-    with session_scope() as session:
-        has_marked_products = session.execute(
-            select(HonestSignProduct.id).where(HonestSignProduct.gtin.is_not(None)).limit(1)
-        ).first()
-
-    imported = 0
-    if not has_marked_products:
-        imported += upsert_honest_sign_products(marked_rows)
-    imported += seed_unmarked_products(unmarked_rows)
-    return imported
-
-
 def upsert_honest_sign_products(rows):
     normalized_rows = []
     seen_gtins = set()
@@ -207,6 +180,46 @@ def upsert_honest_sign_products(rows):
                     )
                 )
     return len(normalized_rows)
+
+
+def replace_honest_sign_products(rows):
+    normalized_rows = []
+    seen_gtins = set()
+    for row in rows or []:
+        gtin = normalize_gtin(row.get("gtin"))
+        name = str(row.get("honest_sign_name") or "").strip()
+        size = str(row.get("size") or "").strip()
+        if not name:
+            raise ValueError(f"Для GTIN {gtin} не указано название.")
+        if gtin in seen_gtins:
+            raise ValueError(f"GTIN {gtin} повторяется в импортируемом справочнике.")
+        seen_gtins.add(gtin)
+        normalized_rows.append((gtin, name, size))
+    if not normalized_rows:
+        raise ValueError("Новый справочник не содержит товаров.")
+
+    now = datetime.now()
+    with session_scope() as session:
+        session.execute(delete(HonestSignProduct))
+        session.add_all(
+            [
+                HonestSignProduct(
+                    gtin=gtin,
+                    honest_sign_name=name,
+                    size=size or None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                for gtin, name, size in normalized_rows
+            ]
+        )
+    return len(normalized_rows)
+
+
+def clear_honest_sign_products():
+    with session_scope() as session:
+        result = session.execute(delete(HonestSignProduct))
+        return int(result.rowcount or 0)
 
 
 def upsert_honest_sign_product(gtin, honest_sign_name):
