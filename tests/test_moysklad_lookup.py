@@ -92,6 +92,46 @@ class MoySkladLookupTests(unittest.TestCase):
         self.assertEqual(actual["customer"], "ООО Лоадед Майнд")
         self.assertEqual(actual["manufacturer"], "ООО Фабрика")
 
+    def test_large_label_uses_custom_directory_descriptions(self):
+        references = {
+            "https://api.example.test/customentity/customer/1": {
+                "name": "1",
+                "description": "ООО Заказчик, Москва",
+            },
+            "https://api.example.test/customentity/manufacturer/1": {
+                "name": "1",
+                "description": "ООО Производитель, Москва",
+            },
+        }
+
+        class Client:
+            def get_href(self, href, params=None):
+                return references[href]
+
+        row = {
+            "attributes": [
+                {
+                    "name": "Заказчик",
+                    "value": {
+                        "name": "1",
+                        "meta": {"href": "https://api.example.test/customentity/customer/1"},
+                    },
+                },
+                {
+                    "name": "Производитель",
+                    "value": {
+                        "name": "1",
+                        "meta": {"href": "https://api.example.test/customentity/manufacturer/1"},
+                    },
+                },
+            ]
+        }
+
+        actual = product_info_from_row(Client(), row)
+
+        self.assertEqual(actual["customer"], "ООО Заказчик, Москва")
+        self.assertEqual(actual["manufacturer"], "ООО Производитель, Москва")
+
 
 if __name__ == "__main__":
     unittest.main()

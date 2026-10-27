@@ -13,12 +13,21 @@ from config import (
     MOYSKLAD_TOKEN,
 )
 from modules.marking.storage import normalize_gtin
+from modules.marking.reference_values import resolve_reference_attribute_descriptions
 from modules.moysklad.client import MoySkladClient, MoySkladError
 
 
 NET_PRICE_QUANTUM = Decimal("0.00000001")
 VAT_MULTIPLIER = Decimal("1.07")
 ARTICLE_CHARACTERISTIC_NAMES = {"артикул", "article"}
+DESCRIPTION_ATTRIBUTE_NAMES = {
+    "заказчик",
+    "customer",
+    "производитель",
+    "изготовитель",
+    "фабрика",
+    "manufacturer",
+}
 
 
 class TrendExportValidationError(RuntimeError):
@@ -248,6 +257,7 @@ def get_retireorder_export_rows(client, document_name, sale_price_type=MOYSKLAD_
 
     result = []
     product_cache = {}
+    reference_cache = {}
     for position in get_all_positions(client, "retireorder", document_id):
         position_id = str(position.get("id") or "").strip()
         if not position_id:
@@ -255,6 +265,18 @@ def get_retireorder_export_rows(client, document_name, sale_price_type=MOYSKLAD_
 
         assortment = position.get("assortment") or {}
         parent_product = expand_parent_product(client, assortment, product_cache)
+        resolve_reference_attribute_descriptions(
+            client,
+            assortment,
+            DESCRIPTION_ATTRIBUTE_NAMES,
+            cache=reference_cache,
+        )
+        resolve_reference_attribute_descriptions(
+            client,
+            parent_product,
+            DESCRIPTION_ATTRIBUTE_NAMES,
+            cache=reference_cache,
+        )
         codes = get_all_position_tracking_codes(client, "retireorder", document_id, position_id)
         result.append(
             {
@@ -343,6 +365,7 @@ def get_unmarked_moysklad_rows(
 ):
     result = []
     product_cache = {}
+    reference_cache = {}
     products_to_find = [
         product
         for product in unmarked_products or []
@@ -379,6 +402,18 @@ def get_unmarked_moysklad_rows(
 
         assortment = max(candidates, key=unmarked_assortment_score)
         parent_product = expand_parent_product(client, assortment, product_cache)
+        resolve_reference_attribute_descriptions(
+            client,
+            assortment,
+            DESCRIPTION_ATTRIBUTE_NAMES,
+            cache=reference_cache,
+        )
+        resolve_reference_attribute_descriptions(
+            client,
+            parent_product,
+            DESCRIPTION_ATTRIBUTE_NAMES,
+            cache=reference_cache,
+        )
         result.append(
             {
                 "name": str(assortment.get("name") or model_name).strip(),

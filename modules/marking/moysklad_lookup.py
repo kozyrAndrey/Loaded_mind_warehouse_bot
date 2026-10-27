@@ -2,6 +2,7 @@ import logging
 
 from modules.marking.duplicate_chz import extract_gtin
 from modules.marking.export import build_moysklad_client, response_rows
+from modules.marking.reference_values import resolve_reference_attribute_descriptions
 from modules.moysklad.client import MoySkladError
 
 
@@ -77,6 +78,20 @@ def gtin_barcode_variants(value):
 
 def product_info_from_row(client, row):
     product = expand_meta_object(client, row.get("product")) or {}
+    reference_cache = {}
+    description_fields = MANUFACTURER_NAMES | CUSTOMER_NAMES
+    resolve_reference_attribute_descriptions(
+        client,
+        row,
+        description_fields,
+        cache=reference_cache,
+    )
+    resolve_reference_attribute_descriptions(
+        client,
+        product,
+        description_fields,
+        cache=reference_cache,
+    )
     country = country_name(client, row) or country_name(client, product)
     size = size_from_characteristics(row) or size_from_attributes(row) or size_from_attributes(product)
     model_name = str((product or {}).get("name") or row.get("name") or "").strip()
