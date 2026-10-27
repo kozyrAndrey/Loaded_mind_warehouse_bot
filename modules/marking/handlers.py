@@ -32,6 +32,7 @@ from modules.marking.storage import (
     list_honest_sign_products,
     list_unmarked_products,
     replace_honest_sign_products,
+    upsert_honest_sign_products,
 )
 from modules.moysklad.client import MoySkladError
 from modules.payroll.google_sheets import find_employee_for_telegram_user, is_manager
@@ -151,8 +152,14 @@ def catalog_import_confirm_keyboard():
         [
             [
                 InlineKeyboardButton(
-                    "✅ Заменить справочник",
-                    callback_data="marking:catalog:import:confirm",
+                    "➕ Дополнить справочник",
+                    callback_data="marking:catalog:import:merge",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔄 Полностью заменить",
+                    callback_data="marking:catalog:import:replace",
                 )
             ],
             [InlineKeyboardButton("❌ Отмена", callback_data="marking:catalog:import:cancel")],
@@ -643,7 +650,7 @@ async def catalog_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Маркируемых товаров: {marked_count}\n"
         f"Немаркируемых товаров: {unmarked_count}\n"
         "Загрузите Excel или CSV с колонками GTIN и названием. "
-        "После проверки и подтверждения файл полностью заменит текущий справочник.",
+        "После проверки можно дополнить текущий справочник или полностью заменить его.",
         reply_markup=catalog_menu_keyboard(),
     )
     return MARKING_CATALOG_MENU
@@ -720,7 +727,9 @@ async def catalog_file_received(update: Update, context: ContextTypes.DEFAULT_TY
         f"Название: колонка {result.name_column}\n"
         f"Товаров: {len(result.rows)}\n\n"
         f"Предпросмотр:\n{preview}{more}\n\n"
-        "После подтверждения текущий справочник будет полностью заменён.",
+        "Выберите режим загрузки:\n"
+        "• дополнить — новые GTIN добавятся, существующие обновятся;\n"
+        "• полностью заменить — прежний справочник будет удалён.",
         reply_markup=catalog_import_confirm_keyboard(),
     )
     return MARKING_CATALOG_IMPORT_CONFIRM
@@ -739,18 +748,32 @@ async def catalog_import_confirmed(update: Update, context: ContextTypes.DEFAULT
             reply_markup=catalog_menu_keyboard(),
         )
         return MARKING_CATALOG_MENU
-    try:
-        imported = replace_honest_sign_products(rows)
-    except (RuntimeError, ValueError) as error:
+    mode = str(query.data or "").rsplit(":", 1)[-1]
+    replace_catalog = mode == "replace"
+    if mode not in {"merge", "replace"}:
         await query.edit_message_text(
-            f"Не удалось заменить справочник: {error}",
+            "Не удалось определить режим загрузки. Отправьте таблицу ещё раз.",
+            reply_markup=catalog_menu_keyboard(),
+        )
+        return MARKING_CATALOG_MENU
+    try:
+        imported = (
+            replace_honest_sign_products(rows)
+            if replace_catalog
+            else upsert_honest_sign_products(rows)
+        )
+    except (RuntimeError, ValueError) as error:
+        action = "заменить" if replace_catalog else "дополнить"
+        await query.edit_message_text(
+            f"Не удалось {action} справочник: {error}",
             reply_markup=catalog_menu_keyboard(),
         )
         return MARKING_CATALOG_MENU
     filename = context.user_data.get("marking_catalog_import_filename", "таблица")
     clear_catalog_import_context(context)
+    result_text = "Справочник заменён" if replace_catalog else "Справочник дополнен"
     await query.edit_message_text(
-        f"Справочник заменён ✅\nФайл: {filename}\nЗаписей в БД: {imported}.",
+        f"{result_text} ✅\nФайл: {filename}\nОбработано записей: {imported}.",
         reply_markup=catalog_menu_keyboard(),
     )
     return MARKING_CATALOG_MENU
@@ -995,7 +1018,7 @@ def get_marking_handlers():
             MARKING_CATALOG_IMPORT_CONFIRM: [
                 CallbackQueryHandler(
                     catalog_import_confirmed,
-                    pattern=r"^marking:catalog:import:confirm$",
+                    pattern=r"^marking:catalog:import:(merge|replace)$",
                 ),
                 CallbackQueryHandler(
                     catalog_import_cancelled,
