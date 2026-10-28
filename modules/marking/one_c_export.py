@@ -42,7 +42,7 @@ ONE_C_HEADERS = [
     "доп. поле (штрих-код)",
     "Категория",
 ]
-BRAND_NAME = "Hommeplusless"
+BRAND_NAME = "Loaded mind"
 FIXED_CATEGORY = "Товары легкой промышленности"
 
 

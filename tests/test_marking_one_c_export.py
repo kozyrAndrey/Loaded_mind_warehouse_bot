@@ -386,7 +386,7 @@ class MarkingOneCExportTests(unittest.TestCase):
         self.assertEqual(worksheet.max_row, 4)
         self.assertEqual(worksheet["B4"].value, "DS-L")
         self.assertEqual(worksheet["C4"].value, CATALOG_NAME)
-        self.assertEqual(worksheet["F4"].value, "Hommeplusless")
+        self.assertEqual(worksheet["F4"].value, "Loaded mind")
         self.assertEqual(worksheet["J4"].value, "ЧЕРНАЯ")
         self.assertEqual(worksheet["M4"].value, "0123456789012")
         self.assertEqual(worksheet["M4"].number_format, "@")
