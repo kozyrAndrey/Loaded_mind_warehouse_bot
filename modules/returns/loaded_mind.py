@@ -1,11 +1,10 @@
 """Возвраты Loaded Mind с выбором товара из МойСклад."""
 
 import asyncio
-import io
 import logging
 
 from telegram import InputMediaPhoto
-from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup, send_or_edit_text
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from config import GROUP_CHAT_ID, RETURNS_TOPIC_ID, SUPPORT_MANAGER_MENTION
@@ -14,7 +13,6 @@ from modules.moysklad.search import compact_product_name, search_products
 from modules.payroll.google_sheets import find_employee_for_telegram_user, get_employees
 from modules.employees.roles import has_role
 from modules.returns.storage import create_return_record
-from modules.returns.cdek_ocr import recognize_cdek_photo, recognize_showroom_photo
 
 
 (PHOTO, COUNTERPARTY, TRACK, COUNT, SEARCH, PRODUCT, CONDITION,
@@ -28,9 +26,6 @@ CONDITIONS = {
     "invoice_rework": "доработка по накладной",
     "not_invoice_defect": "брак не по накладной",
 }
-
-OCR_TIMEOUT_SECONDS = 20
-
 
 def nav_keyboard(extra=None):
     rows = extra or []
@@ -62,7 +57,7 @@ def review_text(value):
               else f"Номер заказа: {value.get('order_number') or 'не найден (необязательно)'}")
     return (f"Проверьте данные с {title}:\n\n"
             f"ФИО контрагента: {value.get('counterparty') or 'не распознано'}\n"
-            f"{number}\n\nЕсли OCR ошибся, исправьте поле перед продолжением.")
+            f"{number}\n\nЕсли есть ошибка, исправьте поле перед продолжением.")
 
 
 async def start(update, context):
@@ -85,31 +80,11 @@ async def photo(update, context):
         return PHOTO
     file_id = update.message.photo[-1].file_id
     data(context)["photo_ids"].append(file_id)
-    is_cdek = data(context)["return_type"] == "cdek"
-    status = await update.message.reply_text("🔎 Считываю данные с накладной…" if is_cdek else "🔎 Считываю данные с этикетки…")
-    ocr_warning = ""
-    try:
-        telegram_file = await context.bot.get_file(file_id)
-        image_buffer = io.BytesIO()
-        await telegram_file.download_to_memory(out=image_buffer)
-        recognize = recognize_cdek_photo if is_cdek else recognize_showroom_photo
-        recognized = await asyncio.wait_for(
-            asyncio.to_thread(recognize, image_buffer.getvalue()),
-            timeout=OCR_TIMEOUT_SECONDS,
-        )
-        data(context).update(recognized)
-    except TimeoutError:
-        ocr_warning = "\n\n⚠️ Автораспознавание заняло слишком много времени. Введите данные вручную."
-        logging.warning("OCR возвратной этикетки превысил таймаут %s секунд", OCR_TIMEOUT_SECONDS)
-    except Exception:
-        ocr_warning = "\n\n⚠️ Не удалось распознать фото. Введите данные вручную."
-        logging.exception("Не удалось распознать возвратную этикетку; доступен ручной ввод")
-    await send_or_edit_text(
-        status,
-        review_text(data(context)) + ocr_warning,
-        reply_markup=review_keyboard(data(context)),
+    await update.message.reply_text(
+        "Фото сохранено ✅\n\nВведите ФИО контрагента:",
+        reply_markup=nav_keyboard(),
     )
-    return REVIEW
+    return COUNTERPARTY
 
 
 async def edit_counterparty(update, context):
@@ -161,6 +136,12 @@ async def counterparty(update, context):
         await update.message.reply_text("Введите ФИО контрагента.")
         return COUNTERPARTY
     data(context)["counterparty"] = value
+    if data(context)["return_type"] == "cdek" and not data(context).get("track_number"):
+        await update.message.reply_text(
+            "Введите номер накладной СДЭК цифрами:",
+            reply_markup=nav_keyboard(),
+        )
+        return TRACK
     if data(context).get("photo_ids"):
         await update.message.reply_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
         return REVIEW

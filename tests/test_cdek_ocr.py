@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from PIL import Image
 
 from modules.returns.cdek_ocr import parse_cdek_text, parse_showroom_text, recognize_cdek_photo
-from modules.returns.loaded_mind import REVIEW, COUNT, photo, review_confirm, summary
+from modules.returns.loaded_mind import COUNTERPARTY, TRACK, counterparty, photo, summary
 
 
 class CdekOcrTests(unittest.TestCase):
@@ -84,77 +84,35 @@ class CdekOcrTests(unittest.TestCase):
 
 
 class CdekReturnFlowTests(unittest.IsolatedAsyncioTestCase):
-    @patch("modules.returns.loaded_mind.asyncio.to_thread", new_callable=AsyncMock)
-    async def test_photo_offers_review_and_manual_corrections(self, to_thread):
-        to_thread.return_value = {"counterparty": "Иванов Иван", "track_number": "1234567890"}
-        status = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
+    async def test_cdek_photo_requests_manual_counterparty_and_track(self):
         message = SimpleNamespace(
             photo=[SimpleNamespace(file_id="photo-id")],
-            reply_text=AsyncMock(return_value=status),
+            reply_text=AsyncMock(),
         )
-        telegram_file = SimpleNamespace(download_to_memory=AsyncMock(side_effect=lambda out: out.write(b"image")))
         context = SimpleNamespace(
-            bot=SimpleNamespace(get_file=AsyncMock(return_value=telegram_file)),
             user_data={"lm_return": {"return_type": "cdek", "photo_ids": [], "items": [], "current": {}}},
         )
 
         state = await photo(SimpleNamespace(message=message), context)
 
-        self.assertEqual(state, REVIEW)
-        self.assertEqual(context.user_data["lm_return"]["track_number"], "1234567890")
-        self.assertIn("Иванов Иван", status.edit_text.await_args.args[0])
-        buttons = status.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
-        self.assertTrue(any(button.callback_data == "lmret:edit_counterparty" for row in buttons for button in row))
-        self.assertTrue(any(button.callback_data == "lmret:edit_track" for row in buttons for button in row))
+        self.assertEqual(state, COUNTERPARTY)
+        self.assertEqual(context.user_data["lm_return"]["photo_ids"], ["photo-id"])
+        self.assertIn("Введите ФИО", message.reply_text.await_args.args[0])
 
-        query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
-        next_state = await review_confirm(SimpleNamespace(callback_query=query), context)
-        self.assertEqual(next_state, COUNT)
+        name_message = SimpleNamespace(text="Иванов Иван", reply_text=AsyncMock())
+        next_state = await counterparty(SimpleNamespace(message=name_message), context)
+        self.assertEqual(next_state, TRACK)
+        self.assertIn("номер накладной", name_message.reply_text.await_args.args[0])
 
-    @patch("modules.returns.loaded_mind.asyncio.to_thread", new_callable=AsyncMock)
-    async def test_showroom_photo_reviews_optional_order_number(self, to_thread):
-        to_thread.return_value = {"counterparty": "Андреев Кирилл", "order_number": "1077644501"}
-        status = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
+    async def test_showroom_photo_requests_manual_counterparty(self):
         message = SimpleNamespace(photo=[SimpleNamespace(file_id="showroom-photo")],
-                                  reply_text=AsyncMock(return_value=status))
-        telegram_file = SimpleNamespace(download_to_memory=AsyncMock(side_effect=lambda out: out.write(b"image")))
+                                  reply_text=AsyncMock())
         context = SimpleNamespace(
-            bot=SimpleNamespace(get_file=AsyncMock(return_value=telegram_file)),
             user_data={"lm_return": {"return_type": "showroom", "photo_ids": [], "items": [], "current": {}}},
         )
         state = await photo(SimpleNamespace(message=message), context)
-        self.assertEqual(state, REVIEW)
-        self.assertIn("1077644501", status.edit_text.await_args.args[0])
-        buttons = status.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
-        self.assertTrue(any(button.callback_data == "lmret:edit_order" for row in buttons for button in row))
-        self.assertFalse(any(button.callback_data == "lmret:edit_track" for row in buttons for button in row))
-        query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
-        self.assertEqual(await review_confirm(SimpleNamespace(callback_query=query), context), COUNT)
-
-    @patch("modules.returns.loaded_mind.asyncio.wait_for", new_callable=AsyncMock)
-    async def test_photo_timeout_offers_manual_input(self, wait_for):
-        async def raise_timeout(awaitable, **_kwargs):
-            awaitable.close()
-            raise TimeoutError
-
-        wait_for.side_effect = raise_timeout
-        status = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
-        message = SimpleNamespace(
-            photo=[SimpleNamespace(file_id="photo-id")],
-            reply_text=AsyncMock(return_value=status),
-        )
-        telegram_file = SimpleNamespace(
-            download_to_memory=AsyncMock(side_effect=lambda out: out.write(b"image"))
-        )
-        context = SimpleNamespace(
-            bot=SimpleNamespace(get_file=AsyncMock(return_value=telegram_file)),
-            user_data={"lm_return": {"return_type": "cdek", "photo_ids": [], "items": [], "current": {}}},
-        )
-
-        state = await photo(SimpleNamespace(message=message), context)
-
-        self.assertEqual(state, REVIEW)
-        self.assertIn("слишком много времени", status.edit_text.await_args.args[0])
+        self.assertEqual(state, COUNTERPARTY)
+        self.assertIn("Введите ФИО", message.reply_text.await_args.args[0])
 
     @patch("modules.returns.loaded_mind.get_employees", return_value=[])
     def test_return_summary_uses_model_and_size(self, _employees):
