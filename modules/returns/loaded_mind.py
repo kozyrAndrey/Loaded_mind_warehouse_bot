@@ -5,7 +5,7 @@ import io
 import logging
 
 from telegram import InputMediaPhoto
-from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup, send_or_edit_text
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 
 from config import GROUP_CHAT_ID, RETURNS_TOPIC_ID, SUPPORT_MANAGER_MENTION
@@ -28,6 +28,8 @@ CONDITIONS = {
     "invoice_rework": "доработка по накладной",
     "not_invoice_defect": "брак не по накладной",
 }
+
+OCR_TIMEOUT_SECONDS = 20
 
 
 def nav_keyboard(extra=None):
@@ -85,16 +87,28 @@ async def photo(update, context):
     data(context)["photo_ids"].append(file_id)
     is_cdek = data(context)["return_type"] == "cdek"
     status = await update.message.reply_text("🔎 Считываю данные с накладной…" if is_cdek else "🔎 Считываю данные с этикетки…")
+    ocr_warning = ""
     try:
         telegram_file = await context.bot.get_file(file_id)
         image_buffer = io.BytesIO()
         await telegram_file.download_to_memory(out=image_buffer)
         recognize = recognize_cdek_photo if is_cdek else recognize_showroom_photo
-        recognized = await asyncio.to_thread(recognize, image_buffer.getvalue())
+        recognized = await asyncio.wait_for(
+            asyncio.to_thread(recognize, image_buffer.getvalue()),
+            timeout=OCR_TIMEOUT_SECONDS,
+        )
         data(context).update(recognized)
+    except TimeoutError:
+        ocr_warning = "\n\n⚠️ Автораспознавание заняло слишком много времени. Введите данные вручную."
+        logging.warning("OCR возвратной этикетки превысил таймаут %s секунд", OCR_TIMEOUT_SECONDS)
     except Exception:
+        ocr_warning = "\n\n⚠️ Не удалось распознать фото. Введите данные вручную."
         logging.exception("Не удалось распознать возвратную этикетку; доступен ручной ввод")
-    await status.edit_text(review_text(data(context)), reply_markup=review_keyboard(data(context)))
+    await send_or_edit_text(
+        status,
+        review_text(data(context)) + ocr_warning,
+        reply_markup=review_keyboard(data(context)),
+    )
     return REVIEW
 
 

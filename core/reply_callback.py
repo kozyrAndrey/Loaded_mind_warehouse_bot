@@ -13,6 +13,7 @@ import hashlib
 from dataclasses import dataclass
 
 from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop
 
 
@@ -134,6 +135,56 @@ class ReplyKeyboardCallbackQuery:
         return await self.message.reply_text(
             "Выберите действие:",
             reply_markup=reply_markup,
+        )
+
+
+async def send_or_edit_text(message, text, *args, reply_markup=None, **kwargs):
+    """Safely update a prompt that may be a bot status or a user message.
+
+    Telegram does not allow a reply keyboard on an edited message.  Reply
+    keyboard callbacks also point at the user's button message, which a bot
+    cannot edit.  In both cases send a new prompt; otherwise keep the compact
+    edit-in-place behaviour used for plain status messages.
+    """
+    if isinstance(reply_markup, ReplyKeyboardMarkup):
+        sender = getattr(message, "from_user", None)
+        if sender is not None and not sender.is_bot:
+            return await message.reply_text(
+                text,
+                *args,
+                reply_markup=reply_markup,
+                **kwargs,
+            )
+        try:
+            await message.edit_text(text, *args, **kwargs)
+        except BadRequest as error:
+            if "message can't be edited" not in str(error).casefold():
+                raise
+            return await message.reply_text(
+                text,
+                *args,
+                reply_markup=reply_markup,
+                **kwargs,
+            )
+        return await message.reply_text(
+            "Выберите действие:",
+            reply_markup=reply_markup,
+        )
+    try:
+        return await message.edit_text(
+            text,
+            *args,
+            reply_markup=reply_markup,
+            **kwargs,
+        )
+    except BadRequest as error:
+        if "message can't be edited" not in str(error).casefold():
+            raise
+        return await message.reply_text(
+            text,
+            *args,
+            reply_markup=reply_markup,
+            **kwargs,
         )
 
 

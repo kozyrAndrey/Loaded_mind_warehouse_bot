@@ -4,7 +4,7 @@ from datetime import datetime
 from io import BytesIO
 
 from telegram import InputFile, Update
-from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
+from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup, send_or_edit_text
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from core.keyboards import build_shipping_menu_keyboard
@@ -124,14 +124,16 @@ async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TY
         )
     except (ShippingServiceError, ShippingValidationError, MoySkladError) as error:
         logger.warning("Не удалось найти заказ для отгрузки: %s", error)
-        await status.edit_text(
+        await send_or_edit_text(
+            status,
             f"⚠️ Не удалось выполнить поиск: {error}\n\nПопробуйте ещё раз.",
             reply_markup=_cancel_keyboard(),
         )
         return SHIPPING_ORDER_NUMBER
     except Exception:
         logger.exception("Непредвиденная ошибка поиска заказа для отгрузки")
-        await status.edit_text(
+        await send_or_edit_text(
+            status,
             "⚠️ Не удалось связаться с «МойСклад». Попробуйте ещё раз позже.",
             reply_markup=_cancel_keyboard(),
         )
@@ -149,7 +151,8 @@ async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TY
             " Найденные заказы имеют статус «Отменён»."
             if result["cancelled_count"] else ""
         )
-        await status.edit_text(
+        await send_or_edit_text(
+            status,
             f"Заказ по {lookup_label} не найден.{suffix}\n\n"
             "Проверьте номер и повторите ввод или сканирование.",
             reply_markup=_cancel_keyboard(),
@@ -162,7 +165,7 @@ async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TY
         "orders": orders,
     }
     if len(orders) == 1:
-        await status.edit_text(f"Найден заказ {orders[0].get('name')}. Загружаю товары…")
+        await send_or_edit_text(status, f"Найден заказ {orders[0].get('name')}. Загружаю товары…")
         return await _prepare_selected_order(status, context, orders[0])
 
     keyboard = [
@@ -170,7 +173,8 @@ async def order_number_received(update: Update, context: ContextTypes.DEFAULT_TY
         for index, order in enumerate(orders)
     ]
     keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="shipping:cancel")])
-    await status.edit_text(
+    await send_or_edit_text(
+        status,
         "Найдено несколько заказов. Выберите нужный:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
@@ -205,7 +209,8 @@ async def _prepare_selected_order(message, context, order, confirmed_shipping_fl
             if order_is_already_shipped(shipping_flag):
                 _draft(context)["pending_order"] = order
                 _draft(context)["pending_shipping_flag"] = shipping_flag
-                await message.edit_text(
+                await send_or_edit_text(
+                    message,
                     f"⚠️ Заказ {order.get('name')} уже отмечен как «{shipping_flag}».\n\n"
                     "Всё равно начать новую отгрузку по этому заказу?",
                     reply_markup=_already_shipped_keyboard(),
@@ -214,7 +219,8 @@ async def _prepare_selected_order(message, context, order, confirmed_shipping_fl
         prepared = await asyncio.to_thread(build_order_units, client, order)
     except (ShippingServiceError, MoySkladError) as error:
         logger.warning("Не удалось загрузить позиции заказа: %s", error)
-        await message.edit_text(
+        await send_or_edit_text(
+            message,
             f"⚠️ Не удалось подготовить заказ: {error}",
             reply_markup=build_shipping_menu_keyboard(),
         )
@@ -222,7 +228,8 @@ async def _prepare_selected_order(message, context, order, confirmed_shipping_fl
         return ConversationHandler.END
     except Exception:
         logger.exception("Непредвиденная ошибка подготовки заказа к отгрузке")
-        await message.edit_text(
+        await send_or_edit_text(
+            message,
             "⚠️ Не удалось загрузить товары заказа. Попробуйте ещё раз позже.",
             reply_markup=build_shipping_menu_keyboard(),
         )
@@ -281,7 +288,8 @@ async def already_shipped_stop(update: Update, context: ContextTypes.DEFAULT_TYP
 async def _ask_for_current_code(message, context):
     draft = _draft(context)
     unit = draft["units"][draft["unit_index"]]
-    await message.edit_text(
+    await send_or_edit_text(
+        message,
         f"Заказ: {draft['order']['name']}\n"
         f"Маркируемый товар {draft['unit_index'] + 1} из {len(draft['units'])}\n\n"
         f"{unit['product_name']}\n"
@@ -347,7 +355,8 @@ async def _advance_or_review(message, context):
 async def _show_review(message, context):
     draft = _draft(context)
     skipped = draft["unmarked_count"] + draft["no_code_count"]
-    await message.edit_text(
+    await send_or_edit_text(
+        message,
         f"Проверьте отгрузку заказа {draft['order']['name']}:\n\n"
         f"Кодов будет сохранено: {len(draft['codes'])}\n"
         f"Товаров без GTIN: {draft['unmarked_count']}\n"

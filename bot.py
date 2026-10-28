@@ -57,6 +57,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 async def error_handler(update, context):
     logging.error("Ошибка при обработке update", exc_info=context.error)
+    message = getattr(update, "effective_message", None)
+    if "inline keyboard expected" in str(context.error).casefold() and message:
+        try:
+            await message.reply_text(
+                "Не удалось обновить устаревшее сообщение. Откройте раздел заново командой /menu."
+            )
+        except Exception:
+            logging.exception("Не удалось сообщить пользователю об устаревшей клавиатуре")
 
 
 async def publish_private_commands(application):

@@ -51,7 +51,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.user_data["shipping_draft"]["unit_index"], 0)
 
     async def test_no_code_skips_only_current_unit_and_opens_review(self):
-        prompt = SimpleNamespace(edit_text=AsyncMock())
+        prompt = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
         query = SimpleNamespace(answer=AsyncMock(), message=prompt)
         context = SimpleNamespace(user_data={"shipping_draft": shipping_draft()})
 
@@ -98,7 +98,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Поле заказа обновлено: уедет", query.edit_message_text.await_args.args[0])
 
     async def test_already_shipped_order_requires_confirmation_before_scanning(self):
-        message = SimpleNamespace(edit_text=AsyncMock())
+        message = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
         context = SimpleNamespace(user_data={"shipping_draft": {"orders": []}})
         order = {"id": "o1", "name": "mind-5098"}
         client = object()

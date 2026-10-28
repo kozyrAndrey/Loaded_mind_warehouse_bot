@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 from telegram import Chat, Message, ReplyKeyboardMarkup, Update, User
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, MessageHandler, filters
@@ -9,6 +10,7 @@ from core.reply_callback import (
     InlineKeyboardMarkup,
     callback_data_from_text,
     route_reply_callback,
+    send_or_edit_text,
 )
 
 
@@ -69,3 +71,16 @@ class ReplyCallbackRoutingTests(unittest.IsolatedAsyncioTestCase):
         await application.process_update(Update(42, message=message))
 
         self.assertEqual(received, ["section:test"])
+
+    async def test_reply_keyboard_is_sent_instead_of_attached_to_edit(self):
+        message = type("Message", (), {})()
+        message.edit_text = AsyncMock()
+        message.reply_text = AsyncMock()
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Открыть", callback_data="section:test")]]
+        )
+
+        await send_or_edit_text(message, "Готово", reply_markup=markup)
+
+        message.edit_text.assert_awaited_once_with("Готово")
+        message.reply_text.assert_awaited_once_with("Выберите действие:", reply_markup=markup)

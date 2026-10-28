@@ -1,10 +1,14 @@
 """Локальное OCR возвратов: подсказки всегда подтверждаются сотрудником."""
 
 import io
+import logging
 import re
 import subprocess
 
 from PIL import Image, ImageOps
+
+
+logger = logging.getLogger(__name__)
 
 
 TRACK_LABEL = re.compile(r"(?:номер\s+накладной|накладная|накладной|трек(?:[-\s]*номер)?|номер\s+отправления|отправление\s*№)", re.I)
@@ -125,7 +129,17 @@ def _recognize_photo(image_bytes, parser, keys, crop_box=None, grayscale=False):
                 ["tesseract", "stdin", "stdout", "-l", "rus+eng", "--psm", str(page_mode)],
                 input=output.getvalue(), capture_output=True, timeout=25, check=True,
             )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        except subprocess.TimeoutExpired:
+            logger.warning("Tesseract превысил таймаут в режиме psm=%s", page_mode)
+            continue
+        except subprocess.CalledProcessError as error:
+            stderr = (error.stderr or b"").decode("utf-8", errors="replace").strip()
+            logger.warning(
+                "Tesseract завершился с кодом %s в режиме psm=%s: %s",
+                error.returncode,
+                page_mode,
+                stderr or "без сообщения об ошибке",
+            )
             continue
         parsed = parser(completed.stdout.decode("utf-8", errors="replace"))
         for key in keys:
