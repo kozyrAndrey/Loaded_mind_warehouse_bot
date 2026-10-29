@@ -3,14 +3,118 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
+from telegram import InlineKeyboardMarkup
+from telegram.error import BadRequest
+
 from modules.tasks.handlers import (
     daily_staff_job,
     export_warehouse_tasks_for_date,
     send_or_edit_task_message,
+    warehouse_tasks_inline_keyboard,
 )
 
 
 class MorningWarehouseRoutingTests(IsolatedAsyncioTestCase):
+    def test_warehouse_task_controls_are_inline_buttons_attached_to_message(self):
+        keyboard = warehouse_tasks_inline_keyboard([
+            {
+                "task_id": "task-1",
+                "Тип задачи": "warehouse",
+                "Описание": "Проверить поставку",
+                "Статус": "active",
+                "Дедлайн": "12:00",
+            },
+        ])
+
+        self.assertIsInstance(keyboard, InlineKeyboardMarkup)
+        button = keyboard.inline_keyboard[0][0]
+        self.assertEqual(button.text, "⬜ Проверить поставку")
+        self.assertEqual(button.callback_data, "taskdone:task-1")
+
+    async def test_existing_export_is_edited_in_place(self):
+        context = SimpleNamespace(
+            bot=SimpleNamespace(
+                edit_message_text=AsyncMock(),
+                send_message=AsyncMock(),
+            )
+        )
+        day = date(2026, 10, 16)
+        keyboard = warehouse_tasks_inline_keyboard([
+            {
+                "task_id": "task-1",
+                "Тип задачи": "warehouse",
+                "Описание": "Проверить поставку",
+                "Статус": "done",
+                "Дедлайн": "12:00",
+            },
+        ])
+
+        with (
+            patch(
+                "modules.tasks.handlers.get_task_export",
+                return_value={
+                    "chat_id": "-100123",
+                    "thread_id": "456",
+                    "message_id": "55",
+                },
+            ),
+            patch("modules.tasks.handlers.upsert_task_export") as save_export,
+        ):
+            status = await send_or_edit_task_message(
+                context,
+                day,
+                "warehouse",
+                "-100123",
+                "456",
+                "Обновлённые задачи",
+                keyboard,
+            )
+
+        self.assertEqual(status, "обновлено")
+        context.bot.edit_message_text.assert_awaited_once_with(
+            chat_id=-100123,
+            message_id=55,
+            text="Обновлённые задачи",
+            reply_markup=keyboard,
+        )
+        context.bot.send_message.assert_not_awaited()
+        save_export.assert_not_called()
+
+    async def test_edit_error_does_not_create_duplicate_export(self):
+        context = SimpleNamespace(
+            bot=SimpleNamespace(
+                edit_message_text=AsyncMock(
+                    side_effect=BadRequest("Inline keyboard expected"),
+                ),
+                send_message=AsyncMock(),
+            )
+        )
+        day = date(2026, 10, 16)
+
+        with (
+            patch(
+                "modules.tasks.handlers.get_task_export",
+                return_value={
+                    "chat_id": "-100123",
+                    "thread_id": "456",
+                    "message_id": "55",
+                },
+            ),
+            patch("modules.tasks.handlers.upsert_task_export") as save_export,
+        ):
+            status = await send_or_edit_task_message(
+                context,
+                day,
+                "warehouse",
+                "-100123",
+                "456",
+                "Обновлённые задачи",
+            )
+
+        self.assertEqual(status, "ошибка обновления")
+        context.bot.send_message.assert_not_awaited()
+        save_export.assert_not_called()
+
     async def test_existing_export_in_old_topic_is_recreated_in_warehouse_topic(self):
         sent_message = SimpleNamespace(message_id=99)
         context = SimpleNamespace(

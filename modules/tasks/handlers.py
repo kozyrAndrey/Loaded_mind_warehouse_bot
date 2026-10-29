@@ -2,7 +2,12 @@ import logging
 from datetime import time, timedelta
 from io import BytesIO
 
-from telegram import InputFile, Update
+from telegram import (
+    InlineKeyboardButton as TelegramInlineKeyboardButton,
+    InlineKeyboardMarkup as TelegramInlineKeyboardMarkup,
+    InputFile,
+    Update,
+)
 from core.reply_callback import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
@@ -450,14 +455,26 @@ def confirm_keyboard(prefix, item_id, back_target=None):
 
 
 def warehouse_tasks_inline_keyboard(tasks):
+    """Build the in-message keyboard used by the warehouse topic export.
+
+    The rest of the task-management flow intentionally uses reply keyboards,
+    but an exported task list must keep real Telegram inline buttons.  Besides
+    keeping the controls attached to the post, this also allows Telegram to
+    update the text and checkmarks by editing the original message.
+    """
     rows = []
     for task in filter_active_export_tasks(tasks, TASK_TYPE_WAREHOUSE):
         icon = "✅" if str(task.get("Статус", "")).strip() == TASK_STATUS_DONE else "⬜"
         description = str(task.get("Описание", "")).strip()
         if len(description) > 45:
             description = description[:42] + "..."
-        rows.append([InlineKeyboardButton(f"{icon} {description}", callback_data=f"taskdone:{task.get('task_id')}")])
-    return InlineKeyboardMarkup(rows) if rows else None
+        rows.append([
+            TelegramInlineKeyboardButton(
+                f"{icon} {description}",
+                callback_data=f"taskdone:{task.get('task_id')}",
+            )
+        ])
+    return TelegramInlineKeyboardMarkup(rows) if rows else None
 
 
 async def tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1369,9 +1386,25 @@ async def send_or_edit_task_message(context, day, export_type, chat_id, thread_i
         except BadRequest as error:
             if "Message is not modified" in str(error):
                 return "без изменений"
-            logging.exception("Не удалось отредактировать сообщение задач")
+            error_text = str(error).casefold()
+            original_message_is_unavailable = any(
+                marker in error_text
+                for marker in (
+                    "message to edit not found",
+                    "message can't be edited",
+                    "message_id_invalid",
+                )
+            )
+            if not original_message_is_unavailable:
+                logging.exception("Не удалось отредактировать сообщение задач")
+                return "ошибка обновления"
+            logging.warning(
+                "Исходное сообщение задач недоступно; публикуем замену: %s",
+                error,
+            )
         except Exception:
             logging.exception("Не удалось отредактировать сообщение задач")
+            return "ошибка обновления"
 
     kwargs = {"chat_id": int(chat_id), "text": text}
     if thread_id:
