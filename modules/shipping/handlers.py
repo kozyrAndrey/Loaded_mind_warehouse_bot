@@ -22,6 +22,7 @@ from modules.shipping.service import (
     order_is_already_shipped,
     parse_shipping_marking_code,
     search_customer_orders,
+    set_order_shipping_employee,
     set_order_shipping_flag,
 )
 from modules.shipping.storage import (
@@ -395,13 +396,14 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return SHIPPING_REVIEW
 
+    employee_name = _employee_name(user)
     try:
         saved = await asyncio.to_thread(
             save_shipping,
             draft["order"],
             draft["codes"],
             user.id,
-            _employee_name(user),
+            employee_name,
         )
     except Exception as error:
         logger.exception("Не удалось сохранить отгрузку")
@@ -415,7 +417,8 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SHIPPING_REVIEW
 
     order_name = draft["order"]["name"]
-    attribute_warning = ""
+    attribute_warnings = []
+    shipping_flag_updated = False
     if not draft.get("existing_shipping_flag"):
         try:
             await asyncio.to_thread(
@@ -423,25 +426,49 @@ async def shipping_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 client,
                 draft["order"]["id"],
             )
+            shipping_flag_updated = True
         except Exception as error:
             logger.exception("Не удалось установить признак отгрузки в заказе МойСклад")
-            attribute_warning = (
-                "\n\n⚠️ Отгрузка создана, но не удалось записать «уедет» "
+            attribute_warnings.append(
+                "не удалось записать «уедет» "
                 f"в заказ «МойСклад»: {error}"
             )
+    shipping_employee = ""
+    try:
+        shipping_employee = await asyncio.to_thread(
+            set_order_shipping_employee,
+            client,
+            draft["order"]["id"],
+            employee_name,
+        )
+    except Exception as error:
+        logger.exception("Не удалось записать сотрудника в заказе МойСклад")
+        attribute_warnings.append(
+            f"не удалось записать сотрудника «{employee_name}» в заказ «МойСклад»: {error}"
+        )
     context.user_data.pop("shipping_draft", None)
     demand_name = str(demand.get("name") or demand.get("id") or "без номера")
     existing_shipping_flag = str(draft.get("existing_shipping_flag") or "").strip()
     flag_result = (
         f"\nПоле заказа оставлено без изменений: {existing_shipping_flag}."
         if existing_shipping_flag
-        else (attribute_warning or "\nПоле заказа обновлено: уедет.")
+        else ("\nПоле заказа обновлено: уедет." if shipping_flag_updated else "")
+    )
+    employee_result = (
+        f"\nСотрудник склада: {shipping_employee}."
+        if shipping_employee else ""
+    )
+    warning_result = (
+        "\n\n⚠️ Отгрузка создана, но " + "\n⚠️ ".join(attribute_warnings)
+        if attribute_warnings else ""
     )
     await query.edit_message_text(
         f"Отгрузка {order_name} завершена ✅\n"
         f"В «МойСклад» создан и проведён документ: {demand_name}.\n"
         f"Сохранено кодов: {saved}."
-        + flag_result,
+        + flag_result
+        + employee_result
+        + warning_result,
         reply_markup=build_shipping_menu_keyboard(),
     )
     return ConversationHandler.END

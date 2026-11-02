@@ -10,6 +10,7 @@ MONEY_QUANTUM = Decimal("0.01")
 PAGE_LIMIT = 100
 SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
+SHIPPING_EMPLOYEE_ATTRIBUTE_NAME = "Сотрудник склада оформивший заказ"
 CDEK_ORDER_ATTRIBUTE_NAME = "Накладная СДЭК"
 CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
 SHIPPING_CONFIRMATION_ATTRIBUTE_VALUES = {"уедет", "уехал"}
@@ -113,6 +114,119 @@ def _customer_order_attribute_href(client, attribute_name, expected_type=None):
             f"У поля «{attribute_name}» отсутствует идентификатор."
         )
     return f"{client.base_url}/entity/customerorder/metadata/attributes/{attribute_id}"
+
+
+def _normalized_person_name(value):
+    return " ".join(
+        str(value or "").strip().casefold().replace("ё", "е").split()
+    )
+
+
+def _custom_entity_employee(client, attribute, employee_name):
+    employee_name = str(employee_name or "").strip()
+    if not employee_name:
+        raise ShippingServiceError("Не удалось определить ФИО сотрудника из Telegram.")
+
+    custom_entity_href = str(
+        ((attribute.get("customEntityMeta") or {}).get("href") or "")
+    ).strip()
+    custom_entity_id = custom_entity_href.rstrip("/").rsplit("/", 1)[-1]
+    if not custom_entity_href or not custom_entity_id:
+        raise ShippingServiceError(
+            f"У поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» не указан справочник значений."
+        )
+
+    try:
+        values = _all_pages(
+            lambda params: client.list_entities(
+                f"customentity/{custom_entity_id}",
+                params=params,
+            )
+        )
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+
+    normalized_employee = _normalized_person_name(employee_name)
+    exact = [
+        value for value in values
+        if _normalized_person_name(value.get("name")) == normalized_employee
+    ]
+    if len(exact) == 1:
+        return exact[0]
+
+    employee_parts = set(normalized_employee.split())
+    partial = [
+        value for value in values
+        if set(_normalized_person_name(value.get("name")).split()) <= employee_parts
+        and _normalized_person_name(value.get("name"))
+    ]
+    if len(partial) == 1:
+        return partial[0]
+
+    if len(exact) > 1 or len(partial) > 1:
+        raise ShippingServiceError(
+            f"В справочнике поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» найдено "
+            f"несколько значений для сотрудника «{employee_name}»."
+        )
+    try:
+        return client.create_entity(
+            f"customentity/{custom_entity_id}",
+            {"name": employee_name},
+        )
+    except MoySkladError as error:
+        raise ShippingServiceError(
+            f"Не удалось добавить сотрудника «{employee_name}» в справочник поля "
+            f"«{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}»: {error}"
+        ) from error
+
+
+def set_order_shipping_employee(client, order_id, employee_name):
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        raise ShippingServiceError("У заказа отсутствует идентификатор «МойСклад».")
+    try:
+        payload = client.get("entity/customerorder/metadata/attributes")
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+
+    attribute = next(
+        (
+            row for row in _response_rows(payload)
+            if str(row.get("name") or "").strip() == SHIPPING_EMPLOYEE_ATTRIBUTE_NAME
+        ),
+        None,
+    )
+    if not attribute:
+        raise ShippingServiceError(
+            f"В «МойСклад» не найдено поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}»."
+        )
+    if str(attribute.get("type") or "") != "customentity":
+        raise ShippingServiceError(
+            f"Поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» должно иметь тип customentity."
+        )
+
+    employee = _custom_entity_employee(client, attribute, employee_name)
+    attribute_meta = dict(attribute.get("meta") or {})
+    employee_meta = dict(employee.get("meta") or {})
+    if not attribute_meta.get("href") or not employee_meta.get("href"):
+        raise ShippingServiceError(
+            f"У поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» отсутствуют метаданные."
+        )
+
+    try:
+        client.update_entity(
+            "customerorder",
+            order_id,
+            {
+                "attributes": [{
+                    "meta": attribute_meta,
+                    "value": {"meta": employee_meta},
+                }]
+            },
+        )
+    except MoySkladError as error:
+        raise ShippingServiceError(str(error)) from error
+    return str(employee.get("name") or employee_name).strip()
 
 
 def search_customer_orders(client, query):

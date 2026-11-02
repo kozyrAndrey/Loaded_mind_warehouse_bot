@@ -76,6 +76,10 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
                 return_value={"id": "d1", "name": "00001", "applicable": True},
             ) as create_demand,
             patch("modules.shipping.handlers.save_shipping", return_value=1) as save,
+            patch(
+                "modules.shipping.handlers.set_order_shipping_employee",
+                return_value="Сотрудник",
+            ) as set_employee,
             patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
             patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
             patch("modules.shipping.handlers._employee_name", return_value="Сотрудник"),
@@ -93,9 +97,11 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         save.assert_called_once()
         set_flag.assert_called_once_with(client, "o1")
+        set_employee.assert_called_once_with(client, "o1", "Сотрудник")
         self.assertNotIn("shipping_draft", context.user_data)
         self.assertIn("создан и проведён документ: 00001", query.edit_message_text.await_args.args[0])
         self.assertIn("Поле заказа обновлено: уедет", query.edit_message_text.await_args.args[0])
+        self.assertIn("Сотрудник склада: Сотрудник", query.edit_message_text.await_args.args[0])
 
     async def test_already_shipped_order_requires_confirmation_before_scanning(self):
         message = SimpleNamespace(edit_text=AsyncMock(), reply_text=AsyncMock())
@@ -133,6 +139,10 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
                 return_value={"id": "d1", "name": "00002", "applicable": True},
             ),
             patch("modules.shipping.handlers.save_shipping", return_value=0),
+            patch(
+                "modules.shipping.handlers.set_order_shipping_employee",
+                return_value="Сотрудник",
+            ) as set_employee,
             patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
             patch("modules.shipping.handlers.build_moysklad_client", return_value=client),
             patch("modules.shipping.handlers._employee_name", return_value="Сотрудник"),
@@ -144,6 +154,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state, ConversationHandler.END)
         set_flag.assert_not_called()
+        set_employee.assert_called_once_with(client, "o1", "Сотрудник")
         self.assertIn("оставлено без изменений: уедет", query.edit_message_text.await_args.args[0])
 
     async def test_demand_creation_failure_keeps_review_and_does_not_save_codes(self):
@@ -157,6 +168,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=RuntimeError("Недостаточно товара на складе"),
             ),
             patch("modules.shipping.handlers.save_shipping") as save,
+            patch("modules.shipping.handlers.set_order_shipping_employee") as set_employee,
             patch("modules.shipping.handlers.set_order_shipping_flag") as set_flag,
             patch("modules.shipping.handlers.build_moysklad_client", return_value=object()),
         ):
@@ -168,6 +180,7 @@ class ShippingHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state, SHIPPING_REVIEW)
         save.assert_not_called()
         set_flag.assert_not_called()
+        set_employee.assert_not_called()
         self.assertNotIn("finishing", context.user_data["shipping_draft"])
         self.assertIn("Недостаточно товара", query.edit_message_text.await_args.args[0])
 
