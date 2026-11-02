@@ -10,7 +10,7 @@ MONEY_QUANTUM = Decimal("0.01")
 PAGE_LIMIT = 100
 SHIPPING_ORDER_ATTRIBUTE_NAME = "[CloudPayments] Ссылка на оплату"
 SHIPPING_ORDER_ATTRIBUTE_VALUE = "уедет"
-SHIPPING_EMPLOYEE_ATTRIBUTE_NAME = "Сотрудник склада оформивший заказ"
+SHIPPING_EMPLOYEE_ATTRIBUTE_NAME = "Сотрудник склада, оформивший отгрузку (бот)"
 CDEK_ORDER_ATTRIBUTE_NAME = "Накладная СДЭК"
 CDEK_TRACK_RE = re.compile(r"^\[CDK\]\s*(\d+)$", re.IGNORECASE)
 SHIPPING_CONFIRMATION_ATTRIBUTE_VALUES = {"уедет", "уехал"}
@@ -122,19 +122,28 @@ def _normalized_person_name(value):
     )
 
 
-def _moysklad_employee(client, employee_name):
+def _custom_entity_employee(client, attribute, employee_name):
     employee_name = str(employee_name or "").strip()
     if not employee_name:
         raise ShippingServiceError("Не удалось определить ФИО сотрудника из Telegram.")
 
+    custom_entity_href = str(
+        ((attribute.get("customEntityMeta") or {}).get("href") or "")
+    ).strip()
+    custom_entity_id = custom_entity_href.rstrip("/").rsplit("/", 1)[-1]
+    if not custom_entity_href or not custom_entity_id:
+        raise ShippingServiceError(
+            f"У поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» не указан справочник значений."
+        )
+
     try:
         values = _all_pages(
-            lambda params: client.list_entities("employee", params=params)
+            lambda params: client.list_entities(
+                f"customentity/{custom_entity_id}", params=params
+            )
         )
     except MoySkladError as error:
         raise ShippingServiceError(str(error)) from error
-
-    values = [value for value in values if not value.get("archived")]
 
     normalized_employee = _normalized_person_name(employee_name)
     exact = [
@@ -155,13 +164,17 @@ def _moysklad_employee(client, employee_name):
 
     if len(exact) > 1 or len(partial) > 1:
         raise ShippingServiceError(
-            "В списке сотрудников «МойСклад» найдено "
+            "В справочнике сотрудников «МойСклад» найдено "
             f"несколько значений для сотрудника «{employee_name}»."
         )
-    raise ShippingServiceError(
-        f"Сотрудник «{employee_name}» не найден среди сотрудников «МойСклад». "
-        "Добавьте его в «МойСклад» или укажите совпадающее ФИО."
-    )
+    try:
+        return client.create_entity(
+            f"customentity/{custom_entity_id}", {"name": employee_name}
+        )
+    except MoySkladError as error:
+        raise ShippingServiceError(
+            f"Не удалось добавить сотрудника «{employee_name}» в справочник «МойСклад»: {error}"
+        ) from error
 
 
 def set_order_shipping_employee(client, order_id, employee_name):
@@ -184,12 +197,12 @@ def set_order_shipping_employee(client, order_id, employee_name):
         raise ShippingServiceError(
             f"В «МойСклад» не найдено поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}»."
         )
-    if str(attribute.get("type") or "") != "employee":
+    if str(attribute.get("type") or "") != "customentity":
         raise ShippingServiceError(
-            f"Поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» должно иметь тип employee."
+            f"Поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» должно иметь тип customentity."
         )
 
-    employee = _moysklad_employee(client, employee_name)
+    employee = _custom_entity_employee(client, attribute, employee_name)
     attribute_meta = dict(attribute.get("meta") or {})
     employee_meta = dict(employee.get("meta") or {})
     if not attribute_meta.get("href") or not employee_meta.get("href"):
