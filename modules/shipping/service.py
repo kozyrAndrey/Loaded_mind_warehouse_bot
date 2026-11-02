@@ -122,29 +122,19 @@ def _normalized_person_name(value):
     )
 
 
-def _custom_entity_employee(client, attribute, employee_name):
+def _moysklad_employee(client, employee_name):
     employee_name = str(employee_name or "").strip()
     if not employee_name:
         raise ShippingServiceError("Не удалось определить ФИО сотрудника из Telegram.")
 
-    custom_entity_href = str(
-        ((attribute.get("customEntityMeta") or {}).get("href") or "")
-    ).strip()
-    custom_entity_id = custom_entity_href.rstrip("/").rsplit("/", 1)[-1]
-    if not custom_entity_href or not custom_entity_id:
-        raise ShippingServiceError(
-            f"У поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» не указан справочник значений."
-        )
-
     try:
         values = _all_pages(
-            lambda params: client.list_entities(
-                f"customentity/{custom_entity_id}",
-                params=params,
-            )
+            lambda params: client.list_entities("employee", params=params)
         )
     except MoySkladError as error:
         raise ShippingServiceError(str(error)) from error
+
+    values = [value for value in values if not value.get("archived")]
 
     normalized_employee = _normalized_person_name(employee_name)
     exact = [
@@ -165,19 +155,13 @@ def _custom_entity_employee(client, attribute, employee_name):
 
     if len(exact) > 1 or len(partial) > 1:
         raise ShippingServiceError(
-            f"В справочнике поля «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» найдено "
+            "В списке сотрудников «МойСклад» найдено "
             f"несколько значений для сотрудника «{employee_name}»."
         )
-    try:
-        return client.create_entity(
-            f"customentity/{custom_entity_id}",
-            {"name": employee_name},
-        )
-    except MoySkladError as error:
-        raise ShippingServiceError(
-            f"Не удалось добавить сотрудника «{employee_name}» в справочник поля "
-            f"«{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}»: {error}"
-        ) from error
+    raise ShippingServiceError(
+        f"Сотрудник «{employee_name}» не найден среди сотрудников «МойСклад». "
+        "Добавьте его в «МойСклад» или укажите совпадающее ФИО."
+    )
 
 
 def set_order_shipping_employee(client, order_id, employee_name):
@@ -200,12 +184,12 @@ def set_order_shipping_employee(client, order_id, employee_name):
         raise ShippingServiceError(
             f"В «МойСклад» не найдено поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}»."
         )
-    if str(attribute.get("type") or "") != "customentity":
+    if str(attribute.get("type") or "") != "employee":
         raise ShippingServiceError(
-            f"Поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» должно иметь тип customentity."
+            f"Поле «{SHIPPING_EMPLOYEE_ATTRIBUTE_NAME}» должно иметь тип employee."
         )
 
-    employee = _custom_entity_employee(client, attribute, employee_name)
+    employee = _moysklad_employee(client, employee_name)
     attribute_meta = dict(attribute.get("meta") or {})
     employee_meta = dict(employee.get("meta") or {})
     if not attribute_meta.get("href") or not employee_meta.get("href"):

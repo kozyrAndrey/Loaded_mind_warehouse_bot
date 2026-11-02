@@ -35,7 +35,7 @@ class FakeClient:
         self.order_calls = []
         self.position_calls = []
         self.metadata_attributes = []
-        self.custom_entity_values = []
+        self.employees = []
         self.updates = []
         self.order_detail = {}
         self.template = {}
@@ -44,10 +44,10 @@ class FakeClient:
         self.base_url = "https://api.moysklad.test/api/remap/1.2"
 
     def list_entities(self, entity_type, params=None):
-        if entity_type.startswith("customentity/"):
+        if entity_type == "employee":
             return {
-                "meta": {"size": len(self.custom_entity_values)},
-                "rows": self.custom_entity_values,
+                "meta": {"size": len(self.employees)},
+                "rows": self.employees,
             }
         self.order_calls.append((entity_type, dict(params or {})))
         return {"meta": {"size": len(self.orders)}, "rows": self.orders}
@@ -77,16 +77,6 @@ class FakeClient:
 
     def create_entity(self, entity_type, payload, params=None):
         self.create_calls.append((entity_type, payload, dict(params or {})))
-        if entity_type.startswith("customentity/"):
-            return {
-                "id": "new-employee",
-                "name": payload["name"],
-                "meta": {
-                    "href": f"{self.base_url}/entity/{entity_type}/new-employee",
-                    "type": "customentity",
-                    "mediaType": "application/json",
-                },
-            }
         return {"id": "demand-1", "name": "00001", "applicable": True}
 
 
@@ -248,9 +238,8 @@ class ShippingOrderTests(unittest.TestCase):
             ),
         ])
 
-    def test_completed_shipping_sets_employee_custom_entity_from_full_name(self):
+    def test_completed_shipping_sets_moysklad_employee_from_full_name(self):
         client = FakeClient()
-        custom_entity_id = "employees-list"
         attribute_meta = {
             "href": "https://api.moysklad.test/employee-attribute",
             "type": "attributemetadata",
@@ -258,25 +247,18 @@ class ShippingOrderTests(unittest.TestCase):
         }
         employee_meta = {
             "href": (
-                "https://api.moysklad.test/api/remap/1.2/entity/customentity/"
-                f"{custom_entity_id}/employee-1"
+                "https://api.moysklad.test/api/remap/1.2/entity/employee/employee-1"
             ),
-            "type": "customentity",
+            "type": "employee",
             "mediaType": "application/json",
         }
         client.metadata_attributes = [{
             "id": "employee-attribute",
             "name": SHIPPING_EMPLOYEE_ATTRIBUTE_NAME,
-            "type": "customentity",
+            "type": "employee",
             "meta": attribute_meta,
-            "customEntityMeta": {
-                "href": (
-                    "https://api.moysklad.test/api/remap/1.2/context/"
-                    f"companysettings/metadata/customEntities/{custom_entity_id}"
-                ),
-            },
         }]
-        client.custom_entity_values = [{
+        client.employees = [{
             "id": "employee-1",
             "name": "Егор",
             "meta": employee_meta,
@@ -300,36 +282,23 @@ class ShippingOrderTests(unittest.TestCase):
             },
         )])
 
-    def test_missing_shipping_employee_is_added_to_custom_entity(self):
+    def test_missing_shipping_employee_reports_configuration_error(self):
         client = FakeClient()
         client.metadata_attributes = [{
             "id": "employee-attribute",
             "name": SHIPPING_EMPLOYEE_ATTRIBUTE_NAME,
-            "type": "customentity",
+            "type": "employee",
             "meta": {"href": "attribute-href"},
-            "customEntityMeta": {"href": "metadata/customEntities/employees-list"},
         }]
-        client.custom_entity_values = [{
+        client.employees = [{
             "name": "Егор",
             "meta": {"href": "employee-href"},
         }]
 
-        selected_name = set_order_shipping_employee(
-            client,
-            "order-1",
-            "Дмитрий Тарасов",
-        )
+        with self.assertRaisesRegex(ShippingServiceError, "не найден"):
+            set_order_shipping_employee(client, "order-1", "Дмитрий Тарасов")
 
-        self.assertEqual(selected_name, "Дмитрий Тарасов")
-        self.assertEqual(client.create_calls, [(
-            "customentity/employees-list",
-            {"name": "Дмитрий Тарасов"},
-            {},
-        )])
-        self.assertEqual(
-            client.updates[0][2]["attributes"][0]["value"]["meta"]["href"],
-            f"{client.base_url}/entity/customentity/employees-list/new-employee",
-        )
+        self.assertEqual(client.updates, [])
 
     def test_already_shipped_flag_is_read_from_order(self):
         client = FakeClient()
