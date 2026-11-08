@@ -1242,6 +1242,21 @@ def get_penalties_in_period(start_date, end_date):
     return penalties
 
 
+def get_employee_penalty_coefficient(employee_id, penalty_category, penalty_date, lookback_days=14):
+    """Increase the fine by 0.35 for each positive same-category fine in the prior 14 days."""
+    penalty_dt = parse_date(penalty_date)
+    start_date = (penalty_dt - timedelta(days=lookback_days)).strftime("%d.%m.%Y")
+    category = str(penalty_category or "").strip().casefold()
+    matching_count = sum(
+        1
+        for penalty in get_penalties_in_period(start_date, penalty_date)
+        if str(penalty.get("employee_id")) == str(employee_id)
+        and safe_float(penalty.get("amount")) > 0
+        and str(penalty.get("penalty_category", "")).strip().casefold() == category
+    )
+    return round(1.0 + 0.35 * matching_count, 4)
+
+
 def count_employee_penalties_by_type(employee_id, penalty_type, start_date, end_date):
     count = 0
     for penalty in get_penalties_in_period(start_date, end_date):

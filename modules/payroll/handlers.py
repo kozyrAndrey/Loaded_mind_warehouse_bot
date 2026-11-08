@@ -58,6 +58,7 @@ from modules.payroll.google_sheets import (
     kpi_to_json,
     calculate_kpi_sum,
     count_employee_penalties_by_type,
+    get_employee_penalty_coefficient,
     money,
     report_data_to_model,
     safe_float,
@@ -1086,7 +1087,7 @@ async def send_daily_report_to_topic(
     }
 
 
-def format_penalty_topic_text(employee, penalty_date, penalty_category, penalty_type, comment, amount, created_by, photo_count=0):
+def format_penalty_topic_text(employee, penalty_date, penalty_category, penalty_type, comment, amount, created_by, photo_count=0, coefficient=1.0):
     evidence_text = f"{photo_count} фото" if photo_count else "нет"
     return "\n".join(
         [
@@ -1096,6 +1097,7 @@ def format_penalty_topic_text(employee, penalty_date, penalty_category, penalty_
             f"Дата: {penalty_date}",
             f"Категория: {penalty_category}",
             f"Тип штрафа: {penalty_type}",
+            f"Коэффициент штрафа: {money(coefficient)}",
             f"Комментарий: {comment}",
             f"Сумма: {money(amount)}",
             f"Фото-доказательства: {evidence_text}",
@@ -1105,7 +1107,7 @@ def format_penalty_topic_text(employee, penalty_date, penalty_category, penalty_
     )
 
 
-def format_penalty_preview(employee, penalty_date, penalty_category, penalty_type, comment, amount, photo_count=0):
+def format_penalty_preview(employee, penalty_date, penalty_category, penalty_type, comment, amount, photo_count=0, coefficient=1.0):
     evidence_text = f"{photo_count} фото" if photo_count else "нет"
     return "\n".join(
         [
@@ -1115,6 +1117,7 @@ def format_penalty_preview(employee, penalty_date, penalty_category, penalty_typ
             f"Дата: {penalty_date}",
             f"Категория: {penalty_category}",
             f"Тип штрафа: {penalty_type}",
+            f"Коэффициент штрафа: {money(coefficient)}",
             f"Комментарий: {comment}",
             f"Сумма: {money(amount)}",
             f"Фото-доказательства: {evidence_text}",
@@ -1132,6 +1135,7 @@ async def send_penalty_to_topic(
     amount,
     created_by,
     photo_file_ids=None,
+    coefficient=1.0,
 ):
     if not GROUP_CHAT_ID:
         return "GROUP_CHAT_ID не настроен, сообщение в тему «Штрафы» не отправлено."
@@ -1149,6 +1153,7 @@ async def send_penalty_to_topic(
         amount,
         created_by,
         photo_count=len(photo_file_ids),
+        coefficient=coefficient,
     )
     common_kwargs = {
         "chat_id": int(GROUP_CHAT_ID),
@@ -3702,9 +3707,17 @@ async def penalty_type_selected(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["penalty_category"] = penalty_type.get("category", "Другое")
     context.user_data["penalty_type_name"] = penalty_type["name"]
     context.user_data["penalty_manual_amount"] = bool(penalty_type.get("manual_amount"))
+    coefficient = get_employee_penalty_coefficient(
+        context.user_data["employee_id"],
+        context.user_data["penalty_category"],
+        context.user_data["penalty_date"],
+    )
+    context.user_data["penalty_coefficient"] = coefficient
 
     if not penalty_type.get("manual_amount"):
-        context.user_data["penalty_amount"] = safe_float(penalty_type.get("amount"))
+        base_amount = safe_float(penalty_type.get("amount"))
+        context.user_data["penalty_base_amount"] = base_amount
+        context.user_data["penalty_amount"] = round(base_amount * coefficient, 2)
     else:
         context.user_data.pop("penalty_amount", None)
 
@@ -3741,7 +3754,9 @@ async def penalty_amount_received(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("Введите сумму числом больше 0:")
         return PENALTY_AMOUNT
 
-    context.user_data["penalty_amount"] = amount
+    coefficient = context.user_data.get("penalty_coefficient", 1.0)
+    context.user_data["penalty_base_amount"] = amount
+    context.user_data["penalty_amount"] = round(amount * coefficient, 2)
 
     await update.message.reply_text(
         "Если есть фото-доказательства ошибки, отправьте их сюда.\n\n"
@@ -3762,6 +3777,7 @@ def build_penalty_preview_from_context(context):
         comment=context.user_data["penalty_comment"],
         amount=context.user_data["penalty_amount"],
         photo_count=len(photo_file_ids),
+        coefficient=context.user_data.get("penalty_coefficient", 1.0),
     )
 
 
@@ -3834,6 +3850,7 @@ async def penalty_confirm_received(update: Update, context: ContextTypes.DEFAULT
             amount=amount,
             created_by=created_by,
             photo_file_ids=photo_file_ids,
+            coefficient=context.user_data.get("penalty_coefficient", 1.0),
         )
     except Exception as error:
         logging.exception("Не удалось отправить штраф в тему Telegram")
@@ -3856,6 +3873,7 @@ async def penalty_confirm_received(update: Update, context: ContextTypes.DEFAULT
         f"Дата: {penalty_date}\n"
         f"Категория: {penalty_category}\n"
         f"Тип штрафа: {penalty_type}\n"
+        f"Коэффициент штрафа: {money(context.user_data.get('penalty_coefficient', 1.0))}\n"
         f"Комментарий: {penalty_comment}\n"
         f"Сумма: {money(amount)}\n\n"
         f"Фото-доказательства: {len(photo_file_ids) if photo_file_ids else 'нет'}\n\n"
