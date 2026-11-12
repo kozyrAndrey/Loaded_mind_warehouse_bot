@@ -54,7 +54,20 @@ class MoySkladClient:
                     raw_body = gzip.decompress(raw_body)
                 raw = raw_body.decode("utf-8")
         except HTTPError as error:
-            details = error.read().decode("utf-8", errors="replace")
+            raw_error = error.read()
+            content_encoding = str(
+                (error.headers or {}).get("Content-Encoding", "")
+            ).lower()
+            if "gzip" in content_encoding:
+                try:
+                    raw_error = gzip.decompress(raw_error)
+                except (OSError, EOFError):
+                    # Never expose compressed bytes as garbled text to a user.
+                    raw_error = b""
+
+            details = raw_error.decode("utf-8", errors="replace").strip()
+            if not details:
+                details = "сервер не прислал описание ошибки"
             raise MoySkladError(
                 f"МойСклад вернул HTTP {error.code}: {details}"
             ) from error

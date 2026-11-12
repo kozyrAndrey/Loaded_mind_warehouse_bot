@@ -1,8 +1,11 @@
+import gzip
+import io
 import json
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import MagicMock, patch
 
-from modules.moysklad.client import MoySkladClient
+from modules.moysklad.client import MoySkladClient, MoySkladError
 
 
 class MoySkladClientWriteTests(unittest.TestCase):
@@ -67,6 +70,44 @@ class MoySkladClientWriteTests(unittest.TestCase):
             "https://api.example.test/entity/demand/demand-1/trash",
         )
         self.assertEqual(result, {})
+
+    def test_gzip_http_error_is_decompressed_before_reporting(self):
+        response_body = gzip.compress(
+            '{"errors":[{"error":"Недостаточно прав"}]}'.encode("utf-8")
+        )
+        error = HTTPError(
+            "https://api.example.test/entity/customerorder",
+            403,
+            "Forbidden",
+            {"Content-Encoding": "gzip"},
+            io.BytesIO(response_body),
+        )
+        client = MoySkladClient("token", base_url="https://api.example.test")
+
+        with patch("modules.moysklad.client.urlopen", side_effect=error):
+            with self.assertRaises(MoySkladError) as raised:
+                client.list_entities("customerorder")
+
+        message = str(raised.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("Недостаточно прав", message)
+
+    def test_invalid_gzip_http_error_does_not_expose_binary_data(self):
+        error = HTTPError(
+            "https://api.example.test/entity/customerorder",
+            403,
+            "Forbidden",
+            {"Content-Encoding": "gzip"},
+            io.BytesIO(b"not actually gzip\x00\xff"),
+        )
+        client = MoySkladClient("token", base_url="https://api.example.test")
+
+        with patch("modules.moysklad.client.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                MoySkladError,
+                "HTTP 403: сервер не прислал описание ошибки",
+            ):
+                client.list_entities("customerorder")
 
 
 if __name__ == "__main__":
