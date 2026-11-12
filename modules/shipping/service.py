@@ -602,15 +602,17 @@ def gtins_from_assortment(assortment):
     that variant marked: marking is configured independently per modification.
     """
     barcodes = (assortment or {}).get("barcodes") or []
-    result = []
     for barcode_type in ("gtin", "ean13"):
+        result = []
         for barcode in barcodes:
             if not isinstance(barcode, dict):
                 continue
             gtin = _normalize_catalog_gtin(barcode.get(barcode_type))
             if gtin and gtin not in result:
                 result.append(gtin)
-    return result
+        if result:
+            return result
+    return []
 
 
 def gtin_from_assortment(assortment):

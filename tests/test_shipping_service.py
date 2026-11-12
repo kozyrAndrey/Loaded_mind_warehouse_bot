@@ -506,12 +506,18 @@ class ShippingMarkingTests(unittest.TestCase):
         self.assertEqual(
             gtins_from_assortment({
                 "barcodes": [
-                    {"ean13": VALID_GTIN[1:]},
+                    {"ean13": "2000000000022"},
                     {"gtin": VALID_GTIN},
                     {"gtin": OTHER_GTIN},
                 ],
             }),
             [VALID_GTIN, OTHER_GTIN],
+        )
+
+    def test_ean13_is_used_only_when_no_explicit_gtin_exists(self):
+        self.assertEqual(
+            gtins_from_assortment({"barcodes": [{"ean13": VALID_GTIN[1:]}]}),
+            [VALID_GTIN],
         )
 
     def test_full_code_is_reduced_to_31_characters(self):
