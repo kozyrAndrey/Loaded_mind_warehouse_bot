@@ -595,21 +595,28 @@ def _normalize_catalog_gtin(value):
     return code
 
 
-def gtin_from_assortment(assortment):
-    """Return only the GTIN assigned to the exact order assortment.
+def gtins_from_assortment(assortment):
+    """Return all GTINs assigned to the exact order assortment.
 
     For a variant, a barcode inherited from the parent product must not make
     that variant marked: marking is configured independently per modification.
     """
     barcodes = (assortment or {}).get("barcodes") or []
+    result = []
     for barcode_type in ("gtin", "ean13"):
         for barcode in barcodes:
             if not isinstance(barcode, dict):
                 continue
             gtin = _normalize_catalog_gtin(barcode.get(barcode_type))
-            if gtin:
-                return gtin
-    return ""
+            if gtin and gtin not in result:
+                result.append(gtin)
+    return result
+
+
+def gtin_from_assortment(assortment):
+    """Return the primary GTIN for backwards-compatible callers."""
+    gtins = gtins_from_assortment(assortment)
+    return gtins[0] if gtins else ""
 
 
 def position_unit_price(position):
@@ -677,11 +684,11 @@ def build_order_units(client, order):
     for position in positions:
         assortment = _expanded_reference(client, position.get("assortment") or {}, reference_cache)
         parent = assortment.get("product") or {}
-        gtin = gtin_from_assortment(assortment)
+        gtins = gtins_from_assortment(assortment)
         quantity = _integer_quantity(position)
         price = position_unit_price(position)
         product_name = str(assortment.get("name") or parent.get("name") or "Без названия").strip()
-        if not gtin:
+        if not gtins:
             unmarked_count += quantity
             continue
 
@@ -691,7 +698,8 @@ def build_order_units(client, order):
                     "position_id": str(position.get("id") or ""),
                     "assortment_id": _entity_id(assortment),
                     "product_name": product_name,
-                    "gtin": gtin,
+                    "gtin": gtins[0],
+                    "gtins": list(gtins),
                     "price": format(price, ".2f"),
                     "unit_number": unit_number,
                     "position_quantity": quantity,
@@ -749,7 +757,7 @@ def _plain_values(code):
     return {"01": gtin, "21": serial, "91": value91, "92": value92}
 
 
-def parse_shipping_marking_code(raw_code, expected_gtin=None):
+def parse_shipping_marking_code(raw_code, expected_gtin=None, expected_gtins=None):
     code = normalize_chz_text(raw_code).strip()
     if not code:
         raise ShippingValidationError("Код маркировки пустой.")
@@ -770,12 +778,20 @@ def parse_shipping_marking_code(raw_code, expected_gtin=None):
     if not value92:
         raise ShippingValidationError("AI 92 не содержит значения.")
 
-    normalized_expected = _normalize_catalog_gtin(expected_gtin) if expected_gtin else ""
-    if expected_gtin and not normalized_expected:
-        raise ShippingValidationError("В карточке товара указан некорректный GTIN.")
-    if normalized_expected and gtin != normalized_expected:
+    expected_values = list(expected_gtins or [])
+    if expected_gtin:
+        expected_values.append(expected_gtin)
+    normalized_expected = []
+    for expected_value in expected_values:
+        normalized = _normalize_catalog_gtin(expected_value)
+        if not normalized:
+            raise ShippingValidationError("В карточке товара указан некорректный GTIN.")
+        if normalized not in normalized_expected:
+            normalized_expected.append(normalized)
+    if normalized_expected and gtin not in normalized_expected:
         raise ShippingValidationError(
-            f"GTIN кода {gtin} не совпадает с GTIN товара {normalized_expected}."
+            f"GTIN кода {gtin} не совпадает ни с одним GTIN товара: "
+            f"{', '.join(normalized_expected)}."
         )
 
     short_code = f"01{gtin}21{serial}"

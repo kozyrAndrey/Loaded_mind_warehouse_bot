@@ -12,6 +12,7 @@ from modules.shipping.service import (
     build_order_units,
     create_posted_demand_from_order,
     get_order_shipping_flag,
+    gtins_from_assortment,
     order_is_already_shipped,
     parse_order_lookup_query,
     parse_shipping_marking_code,
@@ -501,6 +502,18 @@ class ShippingOrderTests(unittest.TestCase):
 
 
 class ShippingMarkingTests(unittest.TestCase):
+    def test_all_variant_gtins_are_returned_without_duplicates(self):
+        self.assertEqual(
+            gtins_from_assortment({
+                "barcodes": [
+                    {"ean13": VALID_GTIN[1:]},
+                    {"gtin": VALID_GTIN},
+                    {"gtin": OTHER_GTIN},
+                ],
+            }),
+            [VALID_GTIN, OTHER_GTIN],
+        )
+
     def test_full_code_is_reduced_to_31_characters(self):
         result = parse_shipping_marking_code(FULL_CODE, expected_gtin=VALID_GTIN)
         self.assertEqual(result["short_code"], f"01{VALID_GTIN}21{SERIAL}")
@@ -527,6 +540,21 @@ class ShippingMarkingTests(unittest.TestCase):
     def test_wrong_product_gtin_is_rejected(self):
         with self.assertRaisesRegex(ShippingValidationError, "не совпадает"):
             parse_shipping_marking_code(FULL_CODE, expected_gtin=OTHER_GTIN)
+
+    def test_code_matching_any_product_gtin_is_accepted(self):
+        result = parse_shipping_marking_code(
+            FULL_CODE,
+            expected_gtins=[OTHER_GTIN, VALID_GTIN],
+        )
+
+        self.assertEqual(result["gtin"], VALID_GTIN)
+
+    def test_code_not_matching_any_product_gtin_is_rejected(self):
+        with self.assertRaisesRegex(ShippingValidationError, "ни с одним GTIN"):
+            parse_shipping_marking_code(
+                FULL_CODE,
+                expected_gtins=[OTHER_GTIN],
+            )
 
 
 if __name__ == "__main__":

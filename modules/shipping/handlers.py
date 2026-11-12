@@ -289,6 +289,7 @@ async def already_shipped_stop(update: Update, context: ContextTypes.DEFAULT_TYP
 async def _ask_for_current_code(message, context):
     draft = _draft(context)
     unit = draft["units"][draft["unit_index"]]
+    allowed_gtins = unit.get("gtins") or [unit["gtin"]]
     await send_or_edit_text(
         message,
         f"Заказ: {draft['order']['name']}\n"
@@ -296,7 +297,7 @@ async def _ask_for_current_code(message, context):
         f"{unit['product_name']}\n"
         f"Единица {unit['unit_number']} из {unit['position_quantity']}\n"
         f"Цена: {unit['price']} ₽\n"
-        f"GTIN: {unit['gtin']}\n\n"
+        f"GTIN: {', '.join(allowed_gtins)}\n\n"
         "Отсканируйте полный DataMatrix Честного ЗНАКа.",
         reply_markup=_scan_keyboard(),
     )
@@ -315,7 +316,10 @@ async def marking_code_received(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     try:
-        parsed = parse_shipping_marking_code(update.message.text, expected_gtin=unit["gtin"])
+        parsed = parse_shipping_marking_code(
+            update.message.text,
+            expected_gtins=unit.get("gtins") or [unit["gtin"]],
+        )
     except ShippingValidationError as error:
         await update.message.reply_text(
             f"⚠️ Код не принят: {error}\n\n"
